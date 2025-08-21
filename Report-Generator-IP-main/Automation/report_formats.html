@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Report Formats - VAPT Report Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1a1a2e;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #16213e;
+            border-radius: 8px;
+        }
+        h1 {
+            color: #8a2be2;
+            text-align: center;
+        }
+        h2 {
+            color: #8a2be2;
+            margin-top: 30px;
+        }
+        .report-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            background-color: rgba(0,0,0,0.15);
+            border-left: 4px solid #6923d0;
+            border-radius: 4px;
+        }
+        .report-section ul {
+            margin-left: 20px;
+        }
+        .report-section li {
+            margin-bottom: 5px;
+        }
+        .tag {
+            display: inline-block;
+            background: #6923d0;
+            color: white;
+            border-radius: 3px;
+            padding: 2px 8px;
+            font-size: 0.9em;
+            margin-right: 8px;
+        }
+        a.back-link {
+            color: #8a2be2;
+            text-decoration: underline;
+            font-size: 1em;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Report Generator</span>
+            <span style="font-size:0.9em">
+                <a href="/report_formats.html" style="color:#8a2be2;margin-right:14px;text-decoration:underline">Home</a>
+                <a id="navDashboard" href="/dashboard" style="color:#8a2be2;text-decoration:underline;display:none">Dashboard</a>
+            </span>
+        </h1>
+        <p style="text-align:center; color:#ccc;">Below are the available report types and their structure/formatting details.</p>
+
+        <div class="report-section">
+            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+                Initial Report (Web)
+                <button style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: not-allowed; opacity: 0.6; margin-left: 10px;" disabled>Coming Soon</button>
+            </h2>
+            <ul>
+                <li>Summary of findings (Web application vulnerabilities)</li>
+                <li>Risk assessment analysis table</li>
+                <li>Detailed vulnerability tables (per finding)</li>
+                <li>Proof of Concept (steps, screenshots)</li>
+                <li>Remediation recommendations</li>
+                <li>Charts: Vulnerability distribution by severity</li>
+            </ul>
+        </div>
+
+        <div class="report-section">
+            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+                Initial Report (IP - Type 1)
+                <button onclick="window.location.href='/Automation/test.html'" style="background-color: #00b050; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; margin-left: 10px;">Open Generator</button>
+            </h2>
+            <ul>
+                <li>Summary of findings (IP-based vulnerabilities)</li>
+                <li>Table displaying IP addresses and the number of vulnerabilities severity wise</li>
+                <li>Risk assessment analysis table (per IP)</li>
+                <li>Detailed vulnerability tables (per IP, per finding)</li>
+                <li>IPs having no vulnerabilities are displayed in a separate table</li>
+                <li>Proof of Concept (steps, screenshots)</li>
+                <li>Remediation recommendations</li>
+                <li>Charts: Vulnerability distribution by severity for the entire assessment</li>
+                <li>Charts: Vulnerability distribution by severity for each IP</li>
+            </ul>
+        </div>
+
+        <div class="report-section">
+            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+                Initial Report (IP - Type 2)
+                <button onclick="window.location.href='/Automation/test2.html'" style="background-color: #00b050; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; margin-left: 10px;">Open Generator</button>
+            </h2>
+            <ul>
+                <li>Summary of findings (Vulnerabilities found in the IP addresses)</li>
+                <li>Table displaying IP addresses and the number of vulnerabilities severity wise</li>
+                <li>Detailed vulnerability tables (per finding, IP addresses are grouped together)</li>
+                <li>Vulnerability across multiple IPs is displayed in a single table</li>
+                <li>IPs having no vulnerabilities are displayed in a separate table</li>
+                <li>Proof of Concept (steps, screenshots)</li>
+                <li>Remediation recommendations</li>
+                <li>Charts: Vulnerability distribution by severity for the entire assessment</li>
+            </ul>
+        </div>
+
+
+        <div class="report-section">
+            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+                Closure Report (Web)
+                <button style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: not-allowed; opacity: 0.6; margin-left: 10px;" disabled>Coming Soon</button>
+            </h2>
+            <ul>
+                <li>Summary of remediated and pending vulnerabilities</li>
+                <li>Comparison with initial findings</li>
+                <li>Closure status and recommendations</li>
+                <li>Charts: Before/After vulnerability status</li>
+            </ul>
+            <p style="color:#ffcc00;">Coming soon.</p>
+        </div>
+
+        <div class="report-section">
+            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+                Closure Report (IP)
+                <button style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: not-allowed; opacity: 0.6; margin-left: 10px;" disabled>Coming Soon</button>
+            </h2>
+            <ul>
+                <li>Summary of remediated and pending vulnerabilities (per IP)</li>
+                <li>Comparison with initial findings</li>
+                <li>Closure status and recommendations</li>
+                <li>Charts: Before/After vulnerability status</li>
+            </ul>
+            <p style="color:#ffcc00;">Coming soon.</p>
+        </div>
+
+        <div class="report-section">
+            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+                Cert-IN Report (Web)
+                <button style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: not-allowed; opacity: 0.6; margin-left: 10px;" disabled>Coming Soon</button>
+            </h2>
+            <ul>
+                <li>Format as per Cert-IN guidelines for web applications</li>
+                <li>Includes compliance mapping, summary, and detailed findings</li>
+                <li>Special sections for regulatory requirements</li>
+            </ul>
+            <p style="color:#ffcc00;">Coming soon.</p>
+        </div>
+
+        <div class="report-section">
+            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+                Cert-IN Report (IP)
+                <button style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: not-allowed; opacity: 0.6; margin-left: 10px;" disabled>Coming Soon</button>
+            </h2>
+            <ul>
+                <li>Format as per Cert-IN guidelines for IP assessments</li>
+                <li>Includes compliance mapping, summary, and detailed findings</li>
+                <li>Special sections for regulatory requirements</li>
+            </ul>
+            <p style="color:#ffcc00;">Coming soon.</p>
+        </div>
+    </div>
+    <script>
+      // Reveal Dashboard top nav only for specific emails
+      (async function() {
+        try {
+          const resp = await fetch('/me');
+          if (!resp.ok) return;
+          const me = await resp.json();
+          const allowed = new Set(['sarvesh.salgaonkar@cybersmithsecure.com','developer@cybersmithsecure.com']);
+          if (me && me.email && allowed.has(me.email.toLowerCase())) {
+            document.getElementById('navDashboard').style.display = 'inline-block';
+          }
+        } catch(e) {
+          // ignore
+        }
+      })();
+    </script>
+</body>
+</html> 

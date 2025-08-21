@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Report Generator</title>
+    <style>
+        body { background: #f5f8ff; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
+        .dashboard-container { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 12px; }
+        .dashboard-card { background: #fff; padding: 1.25rem 1.5rem; border-radius: 12px; box-shadow: 0 2px 16px rgba(45,108,223,0.08); text-align: center; width: 100%; max-width: 1400px; }
+        .dashboard-card h2 { margin-bottom: 0.5rem; color: #2d6cdf; }
+        .dashboard-card p { color: #555; margin-bottom: 1.5rem; }
+        .dashboard-card .logout { display: inline-block; margin-top: 1.5rem; color: #fff; background: #2d6cdf; padding: 0.5rem 1.2rem; border-radius: 6px; text-decoration: none; font-weight: 600; transition: background 0.2s; }
+        .dashboard-card .logout:hover { background: #1a3a6b; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="dashboard-card" style="text-align:left;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h2 style="margin:0">Dashboard</h2>
+                    <p style="margin:4px 0 0 0; color:#777">Welcome, {{ user.name }} ({{ user.email }})</p>
+                </div>
+                <a href="/logout" class="logout">Logout</a>
+            </div>
+            <hr style="margin:16px 0;">
+            <div style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
+                <div>
+                    <label style="font-weight:700">Section</label>
+                    <select id="sectionSel" style="padding:6px 8px;border:1px solid #cbd5ff;border-radius:6px">
+                        <option value="current">Home (Upload & Analyze)</option>
+                        <option value="history">Project History</option>
+                        <option value="previous">Previous Dashboards</option>
+                        <option value="logs">Usage Logs</option>
+                    </select>
+                </div>
+                <div id="uploadBox">
+                    <label style="font-weight:600">Dashboard Excel (.xlsx)</label>
+                    <input id="dashfile" type="file" accept=".xlsx,.xls"/>
+                </div>
+                <button id="loadBtn" class="logout" style="background:#00b050">Load</button>
+                <div id="loadStatus" style="color:#1a3a6b"></div>
+                <div id="actionsBox" style="display:none; gap:10px; align-items:flex-end;">
+                    <div>
+                        <label style="font-weight:600">Title</label>
+                        <input id="dsTitle" type="text" placeholder="e.g., June-2025 RXIL" style="padding:6px 8px;border:1px solid #cbd5ff;border-radius:6px;min-width:220px"/>
+                    </div>
+                    <div>
+                        <label style="font-weight:600">Project</label>
+                        <input id="dsProject" type="text" placeholder="Project name" style="padding:6px 8px;border:1px solid #cbd5ff;border-radius:6px;min-width:180px"/>
+                    </div>
+                    <button id="saveBtn" class="logout" style="background:#2d6cdf">Save to Server</button>
+                    <button id="newBtn" class="logout" style="background:#666">New Dashboard</button>
+                </div>
+            </div>
+            <div id="tables" style="margin-top:8px; display:grid; grid-template-columns: 280px 420px 420px; grid-auto-rows: minmax(120px, auto); gap:12px;">
+                <div id="summary"></div>
+                <div id="employeePerformance"></div>
+                <div id="projectPerformance"></div>
+                <div id="projectAnalysis"></div>
+                <div id="employeeData" style="grid-column: 1 / span 2"></div>
+                <div id="trendWrap"></div>
+            </div>
+            <div id="projectDetails" style="margin-top:8px;"></div>
+            <div id="grid" style="margin-top:0px;"></div>
+            <div id="trendRow" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+                <canvas id="trend" height="160" style="flex:1; background:#f9fbff; border:1px solid #e6ecff; border-radius:8px; padding:8px"></canvas>
+            </div>
+            <div id="prevList" style="display:none; margin-top:8px"></div>
+            <div id="logsList" style="display:none; margin-top:8px"></div>
+            <div id="historyList" style="display:none; margin-top:8px"></div>
+            <div style="margin-top:24px; display:flex; justify-content:center;">
+                <img src="/Automation/backend/default_logo.png" alt="Logo" style="max-width:180px; opacity:0.9;"/>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+      // Expected sheet/columns are documented; robust to minor header differences.
+      const $ = (s)=>document.querySelector(s);
+      let trendChart;
+      let pieChart, projectBarChart, projectPieChart, projectHbarChart;
+      let projectDetailCharts = {};
+      let ALL_ROWS = [];
+      let lastLoadedFile = null;
+      function showActions(show){
+        document.getElementById('actionsBox').style.display = show ? 'flex' : 'none';
+      }
+      function renderSummary(total, testers){
+        $('#summary').innerHTML = `<div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#2d6cdf;margin-bottom:8px">Summary Metrics</div>
+          <div style="display:flex;justify-content:space-between">
+            <div><div style="color:#666">Total Vulnerabilities</div><div style="font-size:28px;font-weight:800">${total}</div></div>
+            <div><div style="color:#666">No. of Testers</div><div style="font-size:28px;font-weight:800">${testers}</div></div>
+          </div>
+        </div>`;
+      }
+      function renderEmployeePerformance(topRows){
+        const top = topRows.slice(0,5);
+        const labels = top.map(r=>r.name);
+        const data = top.map(r=>r.count);
+        $('#employeePerformance').innerHTML = `<div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#2d6cdf;margin-bottom:8px">Employee Performance</div>
+          <div style="display:grid; grid-template-columns: 1fr 200px; gap:8px; align-items:center;">
+            <div>
+              <table style="width:100%;border-collapse:collapse">
+                <tr><th align=left>#</th><th align=left>Name</th><th align=right>V.Count</th></tr>
+                ${top.map((r,i)=>`<tr class='empRow' data-name="${r.name}"><td style='padding:6px 8px;border-top:1px solid #eee'>${i+1}</td><td style='padding:6px 8px;border-top:1px solid #eee;cursor:pointer;color:#2d6cdf;text-decoration:underline'>${r.name}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>${r.count}</td></tr>`).join('')}
+              </table>
+            </div>
+            <div><canvas id="top5Pie" height="140"></canvas></div>
+          </div>
+        </div>`;
+        const ctx = document.getElementById('top5Pie');
+        if(pieChart){pieChart.destroy();}
+        pieChart = new Chart(ctx, {type:'pie', data:{labels, datasets:[{data, backgroundColor:['#2d6cdf','#6a449a','#00b050','#ffcc00','#ff6666']}]}, options:{plugins:{legend:{position:'bottom'}}}});
+        document.querySelectorAll('.empRow').forEach(tr=>{
+          tr.addEventListener('click', ()=>{
+            const name = tr.getAttribute('data-name');
+            showEmployeeDetails(name);
+          })
+        });
+      }
+      function showEmployeeDetails(name){
+        const rows = ALL_ROWS.filter(r => (r.ReportedBy||'').toString().trim() === name);
+        const bySeverity = rows.reduce((m,r)=>{ m[r.Severity]=(m[r.Severity]||0)+1; return m; },{});
+        const byName = rows.reduce((m,r)=>{ const k=(r.VulnerabilityName||'').toString().trim(); m[k]=(m[k]||0)+1; return m; },{});
+        const namesList = Object.entries(byName).sort((a,b)=>b[1]-a[1]).slice(0,20);
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:9999';
+        modal.innerHTML = `<div style="width:720px;max-height:80vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.1);padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:800;color:#2d6cdf">${name} – Vulnerability Details</div><button id="mdlClose" style="border:0;background:#2d6cdf;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer">Close</button></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div><div style="font-weight:700;margin-bottom:6px">By Severity</div>
+              <table style="width:100%;border-collapse:collapse">${Object.entries(bySeverity).map(([k,v])=>`<tr><td style='padding:6px 8px;border-top:1px solid #eee'>${k}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>${v}</td></tr>`).join('')}</table>
+            </div>
+            <div><div style="font-weight:700;margin-bottom:6px">Top Vulnerability Names</div>
+              <table style="width:100%;border-collapse:collapse">${namesList.map(([k,v])=>`<tr><td style='padding:6px 8px;border-top:1px solid #eee'>${k}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>${v}</td></tr>`).join('')}</table>
+            </div>
+          </div>
+        </div>`;
+        document.body.appendChild(modal);
+        modal.querySelector('#mdlClose').onclick = ()=> modal.remove();
+        modal.onclick = (e)=>{ if(e.target===modal) modal.remove(); };
+      }
+      function renderSeverityBreakdown(map){
+        const order=["Critical","High","Medium","Low","Informational"]; const color={Critical:'#990000',High:'#FF0000',Medium:'#FFCC00',Low:'#00b050',Informational:'#0070c0'}
+        const total = order.reduce((s,k)=>s+(map[k]||0),0);
+        $('#projectAnalysis').innerHTML = `<div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#2d6cdf;margin-bottom:8px">Severity Breakdown</div>
+          <table style="width:100%;border-collapse:collapse">${order.map(s=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><span style="display:inline-block;width:10px;height:10px;background:${color[s]};margin-right:6px;border-radius:2px"></span>${s}</td><td style="text-align:right;padding:6px 0;border-bottom:1px solid #eee">${map[s]||0}</td></tr>`).join('')}</table>
+          <div style="margin-top:8px;color:#777">Total: ${total}</div>
+        </div>`
+      }
+      function renderEmployeeData(empRows){
+        const color={Critical:'#990000',High:'#FF0000',Medium:'#FFCC00',Low:'#00b050',Informational:'#0070c0'}
+        $('#employeeData').innerHTML = `<div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px; overflow:auto;">
+          <div style="font-weight:700;color:#2d6cdf;margin-bottom:8px">Employee Data</div>
+          <table style="width:100%;border-collapse:collapse;min-width:660px">
+            <tr><th align=left>Emp ID</th><th align=left>Name</th><th align=right>V.Count</th><th>C</th><th>H</th><th>M</th><th>L</th><th>I</th></tr>
+            ${empRows.map(r=>`<tr>
+                <td style='padding:6px 8px;border-top:1px solid #eee'>${r.empId}</td>
+                <td style='padding:6px 8px;border-top:1px solid #eee'>${r.name}</td>
+                <td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>${r.total}</td>
+                ${['Critical','High','Medium','Low','Informational'].map(s=>`<td style='padding:4px 6px;border-top:1px solid #eee;text-align:center;background:${color[s]};color:#fff;font-weight:700'>${r.sev[s]||0}</td>`).join('')}
+            </tr>`).join('')}
+          </table>
+        </div>`;
+      }
+      function renderProjectBar(projectTotals){
+        // Place alongside severity table (reuse projectAnalysis pane with bar below)
+        const ids = Object.keys(projectTotals);
+        const values = ids.map(k=>projectTotals[k]);
+        const container = document.createElement('div');
+        container.innerHTML = `<canvas id="projBar" height="120" style="margin-top:8px"></canvas>`;
+        document.querySelector('#projectAnalysis > div').appendChild(container.firstChild);
+        const ctx = document.getElementById('projBar');
+        if(projectBarChart){projectBarChart.destroy();}
+        projectBarChart = new Chart(ctx, {type:'bar', data:{labels:ids, datasets:[{label:'Total by Project', data:values, backgroundColor:'#6a449a'}]}, options:{plugins:{legend:{display:false}}, scales:{x:{ticks:{autoSkip:false}}}}});
+      }
+      function renderProjectPerformance(projectTotals){
+        const entries = Object.entries(projectTotals).sort((a,b)=>b[1]-a[1]);
+        const top = entries.slice(0,5);
+        const labels = top.map(([k])=>k);
+        const data = top.map(([,v])=>v);
+        $('#projectPerformance').innerHTML = `<div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#2d6cdf;margin-bottom:8px">Project Performance</div>
+          <div style="display:grid; grid-template-columns: 1fr 200px; gap:8px; align-items:center;">
+            <div>
+              <table style="width:100%;border-collapse:collapse">
+                <tr><th align=left>#</th><th align=left>Project</th><th align=right>V.Count</th></tr>
+                ${top.map(([name,count],i)=>`<tr><td style='padding:6px 8px;border-top:1px solid #eee'>${i+1}</td><td style='padding:6px 8px;border-top:1px solid #eee'>${name}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>${count}</td></tr>`).join('')}
+              </table>
+            </div>
+            <div><canvas id="projPie" height="140"></canvas></div>
+          </div>
+          <div style="margin-top:10px"><canvas id="projHbar" height="140"></canvas></div>
+        </div>`;
+        const pctx = document.getElementById('projPie');
+        if(projectPieChart){projectPieChart.destroy();}
+        projectPieChart = new Chart(pctx, {type:'pie', data:{labels, datasets:[{data, backgroundColor:['#6a449a','#2d6cdf','#00b050','#ffcc00','#ff6666']}]}, options:{plugins:{legend:{position:'bottom'}}}});
+        const hbctx = document.getElementById('projHbar');
+        if(projectHbarChart){projectHbarChart.destroy();}
+        const top10 = entries.slice(0,10);
+        projectHbarChart = new Chart(hbctx, {type:'bar', data:{labels: top10.map(([k])=>k), datasets:[{label:'Findings', data: top10.map(([,v])=>v), backgroundColor:'#2d6cdf'}]}, options:{plugins:{legend:{display:false}}, indexAxis:'y'}});
+      }
+      
+      function renderProjectDetails(projectTotals, rows){
+        const projects = Object.keys(projectTotals).sort((a,b)=>projectTotals[b]-projectTotals[a]);
+        let html = '<div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px;margin-bottom:16px;">';
+        html += '<div style="font-weight:700;color:#2d6cdf;margin-bottom:12px;font-size:16px;">Project-wise Analysis</div>';
+        
+        projects.forEach((project, index) => {
+          const projectRows = rows.filter(r => (r.Project||'').toString().trim() === project);
+          const bySeverity = {};
+          const byVulnType = {};
+          
+          projectRows.forEach(r => {
+            // Severity breakdown
+            const severity = r.Severity || 'Unknown';
+            bySeverity[severity] = (bySeverity[severity] || 0) + 1;
+            
+            // Vulnerability type breakdown
+            const vulnName = (r.VulnerabilityName || '').toString().trim();
+            if(vulnName) {
+              byVulnType[vulnName] = (byVulnType[vulnName] || 0) + 1;
+            }
+          });
+          
+          const severityEntries = Object.entries(bySeverity).sort((a,b) => {
+            const order = {Critical: 1, High: 2, Medium: 3, Low: 4, Informational: 5, Unknown: 6};
+            return (order[a[0]] || 999) - (order[b[0]] || 999);
+          });
+          // Sort vulnerabilities by severity order (Critical, High, Medium, Low, Informational)
+          const allVulns = Object.entries(byVulnType).sort((a,b) => {
+            const [nameA] = a;
+            const [nameB] = b;
+            
+            // Find the most common severity for each vulnerability
+            const vulnRowsA = projectRows.filter(r => (r.VulnerabilityName || '').toString().trim() === nameA);
+            const vulnRowsB = projectRows.filter(r => (r.VulnerabilityName || '').toString().trim() === nameB);
+            
+            const severityCountsA = {};
+            const severityCountsB = {};
+            
+            vulnRowsA.forEach(r => {
+              const sev = r.Severity || 'Unknown';
+              severityCountsA[sev] = (severityCountsA[sev] || 0) + 1;
+            });
+            
+            vulnRowsB.forEach(r => {
+              const sev = r.Severity || 'Unknown';
+              severityCountsB[sev] = (severityCountsB[sev] || 0) + 1;
+            });
+            
+            // Get the most common severity for each vulnerability
+            const mostCommonSeverityA = Object.entries(severityCountsA).sort((a,b) => b[1] - a[1])[0]?.[0] || 'Unknown';
+            const mostCommonSeverityB = Object.entries(severityCountsB).sort((a,b) => b[1] - a[1])[0]?.[0] || 'Unknown';
+            
+            // Define severity order
+            const severityOrder = {Critical: 1, High: 2, Medium: 3, Low: 4, Informational: 5, Unknown: 6};
+            
+            // Sort by severity order first, then by count if same severity
+            const orderA = severityOrder[mostCommonSeverityA] || 999;
+            const orderB = severityOrder[mostCommonSeverityB] || 999;
+            
+            if (orderA !== orderB) {
+              return orderA - orderB; // Sort by severity order
+            } else {
+              return b[1] - a[1]; // If same severity, sort by count (highest first)
+            }
+          });
+          
+          // Severity colors
+          const severityColors = {
+            Critical: '#990000',
+            High: '#FF0000', 
+            Medium: '#FFCC00',
+            Low: '#00b050',
+            Informational: '#0070c0',
+            Unknown: '#666666'
+          };
+          
+          html += `
+            <div style="background:#fff;border:1px solid #e6ecff;border-radius:8px;padding:12px;margin-bottom:12px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <h3 style="color:#2d6cdf;margin:0;font-size:14px;">${project}</h3>
+                <span style="background:#2d6cdf;color:#fff;padding:3px 6px;border-radius:4px;font-size:11px;">${projectRows.length} Vulnerabilities</span>
+              </div>
+              
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                <div>
+                  <div style="font-weight:600;margin-bottom:6px;color:#333;">Vulnerability Distribution</div>
+                  <canvas id="projPie${index}" height="80" style="max-height:80px;"></canvas>
+                </div>
+                <div>
+                  <div style="font-weight:600;margin-bottom:6px;color:#333;">Severity Breakdown</div>
+                  <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                    ${severityEntries.map(([sev,count]) => {
+                      const bgColor = severityColors[sev] || '#666666';
+                      return `<tr><td style="padding:3px 6px;border-top:1px solid #eee;background:${bgColor};color:#fff;font-weight:600;border-radius:2px;">${sev}</td><td style="padding:3px 6px;border-top:1px solid #eee;text-align:right;font-weight:600;width:40px;">${count}</td></tr>`;
+                    }).join('')}
+                  </table>
+                </div>
+              </div>
+              
+              <div>
+                <div style="font-weight:600;margin-bottom:6px;color:#333;">All Vulnerability Types</div>
+                <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                  <tr><th style="padding:3px 6px;text-align:left;border-bottom:1px solid #ddd;width:75%;">Vulnerability</th><th style="padding:3px 6px;text-align:right;border-bottom:1px solid #ddd;width:25%;">Count</th></tr>
+                  ${allVulns.map(([name,count]) => {
+                    // Find the most common severity for this vulnerability type
+                    const vulnRows = projectRows.filter(r => (r.VulnerabilityName || '').toString().trim() === name);
+                    const severityCounts = {};
+                    vulnRows.forEach(r => {
+                      const sev = r.Severity || 'Unknown';
+                      severityCounts[sev] = (severityCounts[sev] || 0) + 1;
+                    });
+                    // Get the most common severity for this vulnerability
+                    const mostCommonSeverity = Object.entries(severityCounts).sort((a,b) => b[1] - a[1])[0]?.[0] || 'Unknown';
+                    const bgColor = severityColors[mostCommonSeverity] || '#666666';
+                    return `<tr><td style="padding:3px 6px;border-top:1px solid #eee;background:${bgColor};color:#fff;font-weight:600;border-radius:2px;">${name}</td><td style="padding:3px 6px;border-top:1px solid #eee;text-align:right;font-weight:600;width:40px;">${count}</td></tr>`;
+                  }).join('')}
+                </table>
+              </div>
+            </div>
+          `;
+        });
+        
+        html += '</div>';
+        $('#projectDetails').innerHTML = html;
+        
+        // Create pie charts for each project
+        projects.forEach((project, index) => {
+          const projectRows = rows.filter(r => (r.Project||'').toString().trim() === project);
+          const bySeverity = {};
+          
+          projectRows.forEach(r => {
+            const severity = r.Severity || 'Unknown';
+            bySeverity[severity] = (bySeverity[severity] || 0) + 1;
+          });
+          
+          const severityEntries = Object.entries(bySeverity).sort((a,b) => {
+            const order = {Critical: 0, High: 1, Medium: 2, Low: 3, Informational: 4, Unknown: 5};
+            return (order[a[0]] || 999) - (order[b[0]] || 999);
+          });
+          
+          const ctx = document.getElementById(`projPie${index}`);
+          if(projectDetailCharts[project]) {
+            projectDetailCharts[project].destroy();
+          }
+          
+          if(severityEntries.length > 0) {
+            const labels = severityEntries.map(([sev]) => sev);
+            const data = severityEntries.map(([,count]) => count);
+            const colors = severityEntries.map(([sev]) => {
+              const colorMap = {
+                Critical: '#990000',
+                High: '#FF0000', 
+                Medium: '#FFCC00',
+                Low: '#00b050',
+                Informational: '#0070c0',
+                Unknown: '#666666'
+              };
+              return colorMap[sev] || '#666666';
+            });
+            
+            projectDetailCharts[project] = new Chart(ctx, {
+              type: 'pie',
+              data: {
+                labels: labels,
+                datasets: [{
+                  data: data,
+                  backgroundColor: colors,
+                  borderWidth: 2,
+                  borderColor: '#fff'
+                }]
+              },
+              options: {
+                plugins: { 
+                  legend: { 
+                    position: 'bottom',
+                    labels: { font: { size: 8 } }
+                  } 
+                },
+                responsive: true,
+                maintainAspectRatio: false
+              }
+            });
+          }
+        });
+      }
+      function renderTrend(data){
+        const ctx=$('#trend');
+        if(trendChart){trendChart.destroy();}
+        trendChart=new Chart(ctx, {type:'line', data:{labels:data.labels, datasets:[{label:'Vulnerabilities', data:data.values, borderColor:'#2d6cdf', backgroundColor:'rgba(45,108,223,0.15)', fill:true, tension:0.3}]}, options:{plugins:{legend:{display:false}}}});
+      }
+      function group(arr, key){return arr.reduce((m,r)=>{m[r[key]]=(m[r[key]]||0)+1; return m;},{});}    
+      function normalizeHeaders(arr){
+        const map={ 'empid':'EmpID','emp id':'EmpID','employee id':'EmpID',
+                    'reportedby':'ReportedBy','reported by':'ReportedBy','name':'ReportedBy',
+                    'project':'Project',
+                    'severity':'Severity',
+                    'date':'Date','reportedon':'Date',
+                    'vulnerabilityname':'VulnerabilityName','vulnerability name':'VulnerabilityName' };
+        return arr.map(r=>{
+          const o={};
+          for(const k of Object.keys(r)){
+            const nk = (k||'').toString().trim().toLowerCase();
+            const target = map[nk] || k;
+            o[target] = r[k];
+          }
+          return o;
+        })
+      }
+      function toMonthKey(v){
+        // Accept Date objects or yyyy-mm-dd strings
+        const d = (v instanceof Date) ? v : (v ? new Date(v) : null);
+        if(!d || isNaN(d)) return null;
+        const y=d.getFullYear(); const m=d.getMonth()+1; return `${y}-${String(m).padStart(2,'0')}`;
+      }
+      function parseWorkbook(wb){
+        // 1) pick sheet named 'Vulnerabilities' else first sheet
+        const sheetName = wb.SheetNames.includes('Vulnerabilities') ? 'Vulnerabilities' : wb.SheetNames[0];
+        const sheet = wb.Sheets[sheetName];
+        if(!sheet) throw new Error('No sheets found in workbook');
+        // robust parse
+        let rows = XLSX.utils.sheet_to_json(sheet, {defval:'', raw:true});
+        rows = normalizeHeaders(rows);
+        ALL_ROWS = rows;
+        // Validate essential columns
+        const required=['EmpID','ReportedBy','Project','Severity'];
+        const missing = required.filter(k=>!(k in rows[0]));
+        if(missing.length){ throw new Error(`Missing columns: ${missing.join(', ')}`); }
+        const total = rows.length;
+        const severity = group(rows, 'Severity');
+        const byEmployee = Object.entries(group(rows, 'ReportedBy')).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+        const testers = new Set(rows.map(r=>r.EmpID || r.ReportedBy).filter(Boolean)).size;
+        // Project pivot
+        const projects = {};
+        rows.forEach(r=>{ const p=r.Project||'Unknown'; projects[p]=projects[p]||{Critical:0,High:0,Medium:0,Low:0,Informational:0}; projects[p][r.Severity]=(projects[p][r.Severity]||0)+1; });
+        const projectTotals = Object.fromEntries(Object.entries(projects).map(([k,v])=>[k, Object.values(v).reduce((s,n)=>s+n,0)]));
+        // Employee table
+        const empMap={};
+        rows.forEach(r=>{
+          const key=(r.EmpID||'').toString().trim()+ '|' + (r.ReportedBy||'').toString().trim();
+          if(!empMap[key]) empMap[key]={empId:r.EmpID||'', name:r.ReportedBy||'', total:0, sev:{}};
+          empMap[key].total+=1; empMap[key].sev[r.Severity]=(empMap[key].sev[r.Severity]||0)+1;
+        });
+        const empRows = Object.values(empMap).sort((a,b)=>b.total-a.total);
+        // Trend by Month
+        const monthMap={};
+        rows.forEach(r=>{ const mk=toMonthKey(r.Date); if(mk){ monthMap[mk]=(monthMap[mk]||0)+1; } });
+        const labels = Object.keys(monthMap).sort();
+        const values = labels.map(k=>monthMap[k]);
+        // Render all widgets
+        renderSummary(total, testers);
+        renderEmployeePerformance(byEmployee);
+        renderSeverityBreakdown(severity);
+        renderProjectBar(projectTotals);
+        renderProjectPerformance(projectTotals);
+        renderProjectDetails(projectTotals, rows);
+        renderEmployeeData(empRows);
+        renderTrend({labels, values});
+        // reveal actions once a workbook is rendered
+        showActions(true);
+      }
+      async function listPrevious(){
+        const r = await fetch('/type1/dashboard-datasets');
+        if(!r.ok){ $('#prevList').textContent='Failed to load datasets'; return; }
+        const data = await r.json();
+        $('#prevList').innerHTML = `<div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#2d6cdf;margin-bottom:8px">Previous Dashboards</div>
+          <table style="width:100%;border-collapse:collapse">
+            <tr><th align=left>Title</th><th align=left>Project</th><th align=left>Uploaded By</th><th align=left>Uploaded At</th><th align=left>Actions</th></tr>
+            ${data.map(d=>`<tr>
+              <td style='padding:6px 8px;border-top:1px solid #eee'>${d.title}</td>
+              <td style='padding:6px 8px;border-top:1px solid #eee'>${d.project_name||''}</td>
+              <td style='padding:6px 8px;border-top:1px solid #eee'>${d.uploaded_by_name||''} (${d.uploaded_by_email})</td>
+              <td style='padding:6px 8px;border-top:1px solid #eee'>${d.uploaded_at}</td>
+              <td style='padding:6px 8px;border-top:1px solid #eee'>
+                <a href="/type1/dashboard-datasets/${d.id}/file" style="color:#2d6cdf;text-decoration:underline">Download Excel</a>
+                <button data-dsid="${d.id}" data-title="${d.title}" data-project="${d.project_name||''}" class="viewDashBtn" style="margin-left:10px;border:1px solid #cbd5ff;background:#eef3ff;color:#2d6cdf;border-radius:4px;padding:2px 6px;cursor:pointer">View</button>
+              </td>
+            </tr>`).join('')}
+          </table>
+        </div>`;
+        // Wire "View" buttons to render the entire dashboard from stored Excel
+        document.querySelectorAll('.viewDashBtn').forEach(btn=>{
+          btn.addEventListener('click', async (e)=>{
+            try {
+              const button = e.currentTarget;
+              if (!button) {
+                alert('Error: Button element not found');
+                return;
+              }
+              
+              const id = button.getAttribute('data-dsid');
+              const title = button.getAttribute('data-title');
+              const project = button.getAttribute('data-project');
+              
+              if (!id) {
+                alert('Error: Dashboard ID not found');
+                return;
+              }
+              
+              $('#loadStatus').textContent = 'Loading previous dashboard...';
+              const res = await fetch(`/type1/dashboard-datasets/${id}/file`);
+              if(!res.ok){ 
+                alert('Failed to load dashboard: ' + res.statusText); 
+                $('#loadStatus').textContent = 'Failed to load';
+                return; 
+              }
+              const blob = await res.blob();
+              const arrayBuffer = await blob.arrayBuffer();
+              const wb = XLSX.read(arrayBuffer, {type:'array'});
+              // Switch to Current section and render
+              document.getElementById('sectionSel').value = 'current';
+              const show=(id,flag)=>{document.getElementById(id).style.display=flag?'block':'none'};
+              show('grid', true); show('tables', true); show('prevList', false); show('logsList', false);
+              // set current context and fields
+              const titleValue = title || 'dashboard';
+              const projValue = project || '';
+              document.getElementById('dsTitle').value = titleValue;
+              document.getElementById('dsProject').value = projValue;
+              lastLoadedFile = new File([blob], `${titleValue}.xlsx`, {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+              parseWorkbook(wb);
+              $('#loadStatus').textContent = 'Previous dashboard loaded successfully';
+            } catch (error) {
+              console.error('Error loading dashboard:', error);
+              alert('Error loading dashboard: ' + error.message);
+              $('#loadStatus').textContent = 'Failed to load';
+            }
+          })
+        })
+      }
+      async function listLogs(){
+        const r = await fetch('/type1/audit-logs');
+        if(!r.ok){ $('#logsList').textContent='Failed to load logs'; return; }
+        const data = await r.json();
+        $('#logsList').innerHTML = `<div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#2d6cdf;margin-bottom:8px">Usage Logs</div>
+          <table style="width:100%;border-collapse:collapse"><tr><th align=left>When</th><th align=left>User</th><th align=left>Action</th><th align=left>Details</th></tr>
+          ${data.map(l=>`<tr><td style='padding:6px 8px;border-top:1px solid #eee'>${l.created_at}</td><td style='padding:6px 8px;border-top:1px solid #eee'>${l.user_name||''} (${l.user_email||''})</td><td style='padding:6px 8px;border-top:1px solid #eee'>${l.action}</td><td style='padding:6px 8px;border-top:1px solid #eee'><pre style='margin:0;white-space:pre-wrap'>${l.metadata_json||''}</pre></td></tr>`).join('')}
+          </table>
+        </div>`;
+      }
+      $('#sectionSel').addEventListener('change', async (e)=>{
+        const v=e.target.value;
+        const show=(id,flag)=>{document.getElementById(id).style.display=flag?'block':'none'};
+        show('grid', v==='current');
+        show('tables', v==='current');
+        document.getElementById('uploadBox').style.display = v==='current' ? 'block':'none';
+        show('trendRow', v==='current');
+        if(v!=='current'){ showActions(false); }
+        else if(lastLoadedFile){ showActions(true); }
+        show('prevList', v==='previous');
+        show('logsList', v==='logs');
+        show('historyList', v==='history');
+        if(v==='previous') await listPrevious();
+        if(v==='logs') await listLogs();
+        if(v==='history') await listProjectHistory();
+      });
+      $('#loadBtn').addEventListener('click', async ()=>{
+        const f=$('#dashfile').files[0];
+        if(!f){$('#loadStatus').textContent='Please select an Excel file'; return;}
+        $('#loadStatus').textContent='Loading...';
+        const data = await f.arrayBuffer();
+        const wb = XLSX.read(data, {type:'array'});
+        try{
+          lastLoadedFile = f;
+          const base = f.name.replace(/\.[^.]+$/, '');
+          document.getElementById('dsTitle').value = base;
+          document.getElementById('dsProject').value = '';
+          parseWorkbook(wb);
+          $('#loadStatus').textContent='Loaded';
+        }catch(e){ $('#loadStatus').textContent=e.message; }
+      });
+
+      // Save to server
+      $('#saveBtn').addEventListener('click', async ()=>{
+        if(!lastLoadedFile){ alert('Load an Excel first'); return; }
+        const title = document.getElementById('dsTitle').value.trim() || lastLoadedFile.name.replace(/\.[^.]+$/, '');
+        const project = document.getElementById('dsProject').value.trim();
+        const fd = new FormData();
+        fd.append('title', title);
+        fd.append('project_name', project); // optional, not used for history aggregation
+        fd.append('file', lastLoadedFile);
+        
+        // Use the correct endpoint
+        const r = await fetch('/type1/dashboard/upload', { method:'POST', body: fd });
+        
+        if(r.ok){
+          $('#loadStatus').textContent = 'Saved to server';
+          
+          // Update project history for ALL projects detected in the Excel
+          if(ALL_ROWS.length > 0) {
+            await updateProjectHistoryFromRows(ALL_ROWS);
+          }
+          
+          await listPrevious();
+        } else {
+          const t = await r.text();
+          alert('Save failed: ' + t);
+        }
+      });
+
+
+
+      // New dashboard (reset)
+      $('#newBtn').addEventListener('click', ()=>{
+        // Clear file input and form fields
+        lastLoadedFile = null;
+        $('#dashfile').value = '';
+        $('#dsTitle').value = '';
+        $('#dsProject').value = '';
+        
+        // Clear all dashboard content
+        $('#summary').innerHTML = '';
+        $('#employeePerformance').innerHTML = '';
+        $('#projectPerformance').innerHTML = '';
+        $('#projectAnalysis').innerHTML = '';
+        $('#projectDetails').innerHTML = '';
+        $('#employeeData').innerHTML = '';
+        $('#trendWrap').innerHTML = '';
+        $('#grid').innerHTML = '';
+        
+        // Destroy all Chart.js instances
+        if(trendChart){ 
+          trendChart.destroy(); 
+          trendChart = null; 
+        }
+        if(pieChart){ 
+          pieChart.destroy(); 
+          pieChart = null; 
+        }
+        if(projectBarChart){ 
+          projectBarChart.destroy(); 
+          projectBarChart = null; 
+        }
+        if(projectPieChart){ 
+          projectPieChart.destroy(); 
+          projectPieChart = null; 
+        }
+        if(projectHbarChart){ 
+          projectHbarChart.destroy(); 
+          projectHbarChart = null; 
+        }
+        
+        // Clear all project detail charts
+        Object.values(projectDetailCharts).forEach(chart => {
+          if(chart) {
+            chart.destroy();
+          }
+        });
+        projectDetailCharts = {};
+        
+        // Clear global data
+        ALL_ROWS = [];
+        
+        // Clear status and hide action buttons
+        $('#loadStatus').textContent = '';
+        showActions(false);
+        
+        // Reset section selector to current dashboard
+        $('#sectionSel').value = 'current';
+        $('#prevList').style.display = 'none';
+        $('#logsList').style.display = 'none';
+        $('#historyList').style.display = 'none';
+        
+        console.log('Dashboard cleared successfully');
+      });
+
+      // Project History Functions
+      async function updateProjectHistoryFromRows(rows) {
+        // Group rows by project found in the Excel (ignores manual project field)
+        const byProject = {};
+        rows.forEach(r => {
+          const p = (r.Project || 'Unknown').toString().trim();
+          if(!byProject[p]) byProject[p] = [];
+          byProject[p].push(r);
+        });
+        
+        for (const [projectName, projRows] of Object.entries(byProject)) {
+          await updateProjectHistory(projectName, projRows);
+        }
+      }
+      async function updateProjectHistory(projectName, rows) {
+        try {
+          // Calculate statistics
+          const totalVulns = rows.length;
+          const uniqueVulns = new Set(rows.map(r => r.VulnerabilityName)).size;
+          
+          const severityCounts = {};
+          rows.forEach(row => {
+            const sev = row.Severity || 'Unknown';
+            severityCounts[sev] = (severityCounts[sev] || 0) + 1;
+          });
+          
+          const vulnerabilityDetails = JSON.stringify(
+            Object.entries(
+              rows.reduce((acc, row) => {
+                const vuln = row.VulnerabilityName || 'Unknown';
+                acc[vuln] = (acc[vuln] || 0) + 1;
+                return acc;
+              }, {})
+            ).sort((a, b) => b[1] - a[1])
+          );
+          
+          const formData = new FormData();
+          formData.append('project_name', projectName);
+          formData.append('total_vulnerabilities', totalVulns);
+          formData.append('unique_vulnerabilities', uniqueVulns);
+          formData.append('critical_count', severityCounts['Critical'] || 0);
+          formData.append('high_count', severityCounts['High'] || 0);
+          formData.append('medium_count', severityCounts['Medium'] || 0);
+          formData.append('low_count', severityCounts['Low'] || 0);
+          formData.append('informational_count', severityCounts['Informational'] || 0);
+          formData.append('vulnerability_details', vulnerabilityDetails);
+          
+          const response = await fetch('/type1/project-history/update', {
+            method: 'POST',
+            body: formData
+          });
+          
+          if(response.ok) {
+            console.log('Project history updated successfully');
+          } else {
+            console.error('Failed to update project history');
+          }
+        } catch (error) {
+          console.error('Error updating project history:', error);
+        }
+      }
+
+      async function listProjectHistory() {
+        try {
+          const response = await fetch('/type1/project-history');
+          if (!response.ok) {
+            throw new Error('Failed to fetch project history');
+          }
+          
+          const data = await response.json();
+          const { summary, projects, monthly } = data;
+          
+          // Severity colors
+          const severityColors = {
+            Critical: '#990000',
+            High: '#FF0000', 
+            Medium: '#FFCC00',
+            Low: '#00b050',
+            Informational: '#0070c0',
+            Unknown: '#666666'
+          };
+          
+          let html = `
+            <div style="background:#fff;border:1px solid #e6ecff;border-radius:8px;padding:16px;margin-bottom:16px;">
+              <h3 style="color:#2d6cdf;margin:0 0 12px 0;">Overall Summary</h3>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+                <div style="text-align:center;padding:8px;background:#f9fbff;border-radius:6px;">
+                  <div style="font-size:24px;font-weight:800;color:#2d6cdf;">${summary.total_projects}</div>
+                  <div style="color:#666;font-size:12px;">Projects Evaluated</div>
+                </div>
+                <div style="text-align:center;padding:8px;background:#f9fbff;border-radius:6px;">
+                  <div style="font-size:24px;font-weight:800;color:#2d6cdf;">${summary.total_vulnerabilities}</div>
+                  <div style="color:#666;font-size:12px;">Total Vulnerabilities</div>
+                </div>
+                <div style="text-align:center;padding:8px;background:#f9fbff;border-radius:6px;">
+                  <div style="font-size:24px;font-weight:800;color:#2d6cdf;">${summary.unique_vulnerabilities}</div>
+                  <div style="color:#666;font-size:12px;">Unique Vulnerabilities</div>
+                </div>
+              </div>
+              
+              <div style="margin-top:12px;">
+                <h4 style="color:#333;margin:0 0 8px 0;">Severity Breakdown (All Projects)</h4>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;">
+                  <div style="text-align:center;padding:6px;background:${severityColors.Critical};color:#fff;border-radius:4px;font-weight:600;">
+                    <div style="font-size:18px;">${summary.critical_count}</div>
+                    <div style="font-size:11px;">Critical</div>
+                  </div>
+                  <div style="text-align:center;padding:6px;background:${severityColors.High};color:#fff;border-radius:4px;font-weight:600;">
+                    <div style="font-size:18px;">${summary.high_count}</div>
+                    <div style="font-size:11px;">High</div>
+                  </div>
+                  <div style="text-align:center;padding:6px;background:${severityColors.Medium};color:#333;border-radius:4px;font-weight:600;">
+                    <div style="font-size:18px;">${summary.medium_count}</div>
+                    <div style="font-size:11px;">Medium</div>
+                  </div>
+                  <div style="text-align:center;padding:6px;background:${severityColors.Low};color:#fff;border-radius:4px;font-weight:600;">
+                    <div style="font-size:18px;">${summary.low_count}</div>
+                    <div style="font-size:11px;">Low</div>
+                  </div>
+                  <div style="text-align:center;padding:6px;background:${severityColors.Informational};color:#fff;border-radius:4px;font-weight:600;">
+                    <div style="font-size:18px;">${summary.informational_count}</div>
+                    <div style="font-size:11px;">Informational</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div style="margin-top:12px;">
+              <h4 style="color:#333;margin:0 0 8px 0;">Monthly Overview</h4>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+                ${(monthly||[]).map(m=>`
+                  <div class='monthly-card' data-month='${m.month}' style='cursor:pointer;background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px;'>
+                    <div style='display:flex;justify-content:space-between;align-items:center;'>
+                      <div style='font-weight:800;color:#2d6cdf;font-size:14px'>${m.month}</div>
+                      <span style='font-size:11px;color:#777'>(tap for details)</span>
+                    </div>
+                    <div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px'>
+                      <div style='text-align:center;background:#eef3ff;border-radius:6px;padding:8px'>
+                        <div style='font-size:20px;font-weight:800;color:#2d6cdf'>${m.projects_evaluated}</div>
+                        <div style='font-size:11px;color:#666'>Projects</div>
+                      </div>
+                      <div style='text-align:center;background:#eef3ff;border-radius:6px;padding:8px'>
+                        <div style='font-size:20px;font-weight:800;color:#2d6cdf'>${m.total_vulnerabilities}</div>
+                        <div style='font-size:11px;color:#666'>Total Vulns</div>
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+          
+          if (projects.length > 0) {
+            html += `
+              <div style="background:#fff;border:1px solid #e6ecff;border-radius:8px;padding:16px;">
+                <h3 style="color:#2d6cdf;margin:0 0 12px 0;">Project Details</h3>
+                <div style="overflow-x:auto;">
+                  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead>
+                      <tr style="background:#f9fbff;">
+                        <th style="padding:8px;text-align:left;border-bottom:2px solid #e6ecff;">Project Name</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Total Vulns</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Unique Vulns</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Critical</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">High</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Medium</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Low</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Info</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Evaluations</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">First Evaluated</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Last Evaluated</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">Uploaded By</th>
+                        <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff;">History</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            projects.forEach(project => {
+              const firstDate = new Date(project.first_evaluated).toLocaleDateString();
+              const lastDate = new Date(project.last_evaluated).toLocaleDateString();
+              
+              html += `
+                <tr style="border-bottom:1px solid #eee;">
+                  <td style="padding:8px;font-weight:600;color:#2d6cdf;">${project.project_name}</td>
+                  <td style="padding:8px;text-align:center;font-weight:600;">${project.total_vulnerabilities}</td>
+                  <td style="padding:8px;text-align:center;">${project.unique_vulnerabilities}</td>
+                  <td style="padding:8px;text-align:center;background:${severityColors.Critical};color:#fff;font-weight:600;border-radius:2px;">${project.critical_count}</td>
+                  <td style="padding:8px;text-align:center;background:${severityColors.High};color:#fff;font-weight:600;border-radius:2px;">${project.high_count}</td>
+                  <td style="padding:8px;text-align:center;background:${severityColors.Medium};color:#333;font-weight:600;border-radius:2px;">${project.medium_count}</td>
+                  <td style="padding:8px;text-align:center;background:${severityColors.Low};color:#fff;font-weight:600;border-radius:2px;">${project.low_count}</td>
+                  <td style="padding:8px;text-align:center;background:${severityColors.Informational};color:#fff;font-weight:600;border-radius:2px;">${project.informational_count}</td>
+                  <td style="padding:8px;text-align:center;background:#2d6cdf;color:#fff;font-weight:600;border-radius:2px;">${project.evaluation_count}</td>
+                  <td style="padding:8px;text-align:center;font-size:11px;">${firstDate}</td>
+                  <td style="padding:8px;text-align:center;font-size:11px;">${lastDate}</td>
+                  <td style="padding:8px;text-align:center;font-size:11px;">${project.uploaded_by_name || project.uploaded_by_email}</td>
+                  <td style="padding:8px;text-align:center;"><button class="timelineBtn" data-proj="${project.project_name}" style="border:1px solid #cbd5ff;background:#eef3ff;color:#2d6cdf;border-radius:4px;padding:2px 8px;cursor:pointer">Timeline</button></td>
+                </tr>
+              `;
+            });
+            
+            html += `
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          } else {
+            html += `
+              <div style="background:#fff;border:1px solid #e6ecff;border-radius:8px;padding:16px;text-align:center;color:#666;">
+                <p>No projects have been evaluated yet. Upload and analyze Excel files in the Home section to start building project history.</p>
+              </div>
+            `;
+          }
+          
+          const container = document.getElementById('historyList');
+          container.innerHTML = html;
+          // Wire monthly cards to open a detail view
+          container.querySelectorAll('.monthly-card').forEach(card=>{
+            card.addEventListener('click', async ()=>{
+              const month = card.getAttribute('data-month');
+              await showMonthlyDetail(month);
+            });
+          });
+          // wire timeline buttons
+          container.querySelectorAll('.timelineBtn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+              const proj = e.currentTarget.getAttribute('data-proj');
+              await showProjectTimeline(proj);
+            });
+          });
+        } catch (error) {
+          console.error('Error loading project history:', error);
+          document.getElementById('historyList').innerHTML = `
+            <div style="background:#fff;border:1px solid #e6ecff;border-radius:8px;padding:16px;text-align:center;color:#ff0000;">
+              <p>Error loading project history: ${error.message}</p>
+            </div>
+          `;
+        }
+      }
+
+      async function showProjectTimeline(projectName){
+        try{
+          const r = await fetch('/type1/project-history/events');
+          if(!r.ok) throw new Error('Failed to fetch events');
+          const eventsByProject = await r.json();
+          const list = (eventsByProject[projectName]||[]).sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
+          const modal = document.createElement('div');
+          modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:9999';
+          modal.innerHTML = `<div style="width:780px;max-height:85vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.1);padding:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:800;color:#2d6cdf">${projectName} – Evaluation Timeline</div><button id="tlClose" style="border:0;background:#2d6cdf;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer">Close</button></div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+              <tr style="background:#f9fbff"><th style="padding:8px;text-align:left;border-bottom:2px solid #e6ecff">When</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Total</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Critical</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">High</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Medium</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Low</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Info</th><th style="padding:8px;text-align:left;border-bottom:2px solid #e6ecff">Uploaded By</th></tr>
+              ${list.map(ev=>`<tr><td style='padding:6px 8px;border-top:1px solid #eee'>${new Date(ev.created_at).toLocaleString()}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center;font-weight:700'>${ev.total_vulnerabilities}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${ev.critical_count}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${ev.high_count}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${ev.medium_count}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${ev.low_count}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${ev.informational_count}</td><td style='padding:6px 8px;border-top:1px solid #eee'>${ev.uploaded_by_name || ev.uploaded_by_email || ''}</td></tr>`).join('')}
+            </table>
+          </div>`;
+          document.body.appendChild(modal);
+          modal.querySelector('#tlClose').onclick = ()=> modal.remove();
+          modal.onclick = (e)=>{ if(e.target===modal) modal.remove(); };
+        }catch(err){
+          alert('Failed to load timeline: ' + err.message);
+        }
+      }
+
+      async function showMonthlyDetail(monthKey){
+        try{
+          const r = await fetch(`/type1/project-history/monthly/${monthKey}`);
+          if(!r.ok) throw new Error('Failed to fetch monthly detail');
+          const data = await r.json();
+          const sev = data.severity_counts || {};
+          const projects = data.projects || [];
+
+          const modal = document.createElement('div');
+          modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:9999';
+          modal.innerHTML = `<div style="width:900px;max-height:88vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.1);padding:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:800;color:#2d6cdf">Monthly Overview – ${data.month}</div><button id="moClose" style="border:0;background:#2d6cdf;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer">Close</button></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px"><div style="font-weight:700;margin-bottom:6px;color:#333">Projects Evaluated</div><canvas id="moBar" height="160"></canvas></div>
+              <div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px"><div style="font-weight:700;margin-bottom:6px;color:#333">Severity Distribution</div><canvas id="moPie" height="160"></canvas></div>
+            </div>
+            <div style="margin-top:12px;background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+              <div style="font-weight:700;margin-bottom:6px;color:#333">Projects in ${data.month}</div>
+              <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:12px">
+                  <tr style="background:#eef3ff"><th style="padding:8px;text-align:left;border-bottom:2px solid #e6ecff">Project</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Total</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Critical</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">High</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Medium</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Low</th><th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Info</th></tr>
+                  ${projects.map(p=>`<tr><td style='padding:6px 8px;border-top:1px solid #eee'>${p.project_name}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center;font-weight:700'>${p.total_vulnerabilities}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${p.critical_count}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${p.high_count}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${p.medium_count}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${p.low_count}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>${p.informational_count}</td></tr>`).join('')}
+                </table>
+              </div>
+            </div>
+          </div>`;
+          document.body.appendChild(modal);
+          modal.querySelector('#moClose').onclick = ()=> modal.remove();
+          modal.onclick = (e)=>{ if(e.target===modal) modal.remove(); };
+
+          // Charts
+          const barCtx = document.getElementById('moBar');
+          const pieCtx = document.getElementById('moPie');
+          const labels = projects.map(p=>p.project_name);
+          const values = projects.map(p=>p.total_vulnerabilities);
+          new Chart(barCtx, {type:'bar', data:{labels, datasets:[{label:'Findings', data:values, backgroundColor:'#2d6cdf'}]}, options:{plugins:{legend:{display:false}}, scales:{x:{ticks:{autoSkip:false}}}}});
+          const sevLabels = ['Critical','High','Medium','Low','Informational'];
+          const sevValues = sevLabels.map(k=>sev[k]||0);
+          const sevColors = ['#990000','#FF0000','#FFCC00','#00b050','#0070c0'];
+          new Chart(pieCtx, {type:'pie', data:{labels:sevLabels, datasets:[{data:sevValues, backgroundColor:sevColors}]}, options:{plugins:{legend:{position:'bottom'}}}});
+        }catch(err){
+          alert('Failed to load monthly overview: ' + err.message);
+        }
+      }
+    </script>
+</body>
+</html> 

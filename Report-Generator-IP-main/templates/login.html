@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Report Generator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            font-family: 'Roboto', sans-serif;
+            background: #0a174e;
+            background-image: url('https://images.unsplash.com/photo-1465101046530-73398c7f28ca?auto=format&fit=crop&w=1500&q=80');
+            background-repeat: no-repeat;
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+        .overlay {
+            
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(10, 23, 78, 0.85); /* Deep blue overlay */
+            z-index: 1;
+        }
+        .login-container {
+            position: relative;
+            z-index: 2;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: rgba(255,255,255,0.97);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(10,23,78,0.25);
+            padding: 2.5rem 2rem 2rem 2rem;
+            max-width: 350px;
+            width: 100%;
+            text-align: center;
+        }
+        .login-card h2 {
+            margin-bottom: 0.3rem;
+            font-weight: 700;
+            font-size: 2rem;
+            color: #0a174e;
+        }
+        .login-card p {
+            color: #3c4a6b;
+            margin-bottom: 1.2rem;
+            font-size: 1.05rem;
+        }
+        .login-card label {
+            display: block;
+            text-align: left;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #0a174e;
+        }
+        .login-card input[type="email"] {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 8px;
+            border: 1px solid #bfc9e0;
+            margin-bottom: 1.2rem;
+            font-size: 1rem;
+            background: #f5f8ff;
+        }
+        .login-card button {
+            width: 100%;
+            padding: 0.75rem;
+            background: linear-gradient(90deg, #2d6cdf 0%, #7f53ac 100%);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-bottom: 1.2rem;
+            transition: background 0.2s;
+            box-shadow: 0 2px 8px rgba(45,108,223,0.08);
+        }
+        .login-card button:hover {
+            background: linear-gradient(90deg, #1a3a6b 0%, #7f53ac 100%);
+        }
+        .login-card .org-logo {
+            width: 120px;
+            margin-bottom: 0.5rem;
+        }
+        @media (max-width: 500px) {
+            .login-card {
+                padding: 1.5rem 0.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <img src="/static/logo.png" alt="Logo" class="org-logo" onerror="this.style.display='none'">
+            <h2>Log in to Report Generator</h2>
+            <p>Sign in with your registered Microsoft account</p>
+            <form action="/auth/login" method="post">
+                <label for="email">Email</label>
+                <input type="email" name="email" id="email" placeholder="name@company.com" required autocomplete="off">
+                <button type="submit">Login with Microsoft</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html> 

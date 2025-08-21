@@ -1,0 +1,259 @@
+<!DOCTYPE html>x
+<html>
+<head>
+    <title>VAPT Report Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1a1a2e;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #16213e;
+            border-radius: 8px;
+        }
+        h1 {
+            color: #8a2be2;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="file"], input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #6923d0;
+            border-radius: 4px;
+            background-color: #0f3460;
+            color: white;
+        }
+        button {
+            background-color: #6923d0;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #8a2be2;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: rgba(0, 0, 0, 0.3);
+        }
+        .info-section {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px dashed #6923d0;
+            border-radius: 4px;
+            background-color: rgba(0, 0, 0, 0.2);
+        }
+        .info-section h3 {
+            margin-top: 0;
+            color: #8a2be2;
+        }
+        .info-section ul {
+            margin-left: 20px;
+            padding-left: 0;
+        }
+        .info-section li {
+            margin-bottom: 5px;
+        }
+        .error-list {
+            color: #ff5555;
+            margin-top: 15px;
+            background-color: rgba(255, 0, 0, 0.1);
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .error-list h4 {
+            margin-top: 0;
+            color: #ff5555;
+        }
+        .error-list ul {
+            margin-top: 5px;
+            padding-left: 20px;
+        }
+        .error-list li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>VAPT Report Generator</h1>
+        
+        <form id="generateForm" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="excelFile">Excel File with Vulnerabilities </label>
+                <input type="file" id="excelFile" name="file" accept=".xlsx, .xls">
+            </div>
+            <div class="form-group">
+                <label for="assessmentFile">Excel File with Assessment Details:</label>
+                <input type="file" id="assessmentFile" name="assessment_file" accept=".xlsx, .xls">
+            </div>
+            <div class="form-group">
+                
+<label for="pocImages">POC Screenshots (.zip):</label>
+                <input type="file" id="pocImages" name="poc_images" accept=".zip">
+            </div>
+            <div class="form-group">
+                <label for="clientName">Client Name:</label>
+                <input type="text" id="clientName" name="client_name" placeholder="Client Name">
+            </div>
+            <div class="form-group">
+                <label for="companyLogo">Company Logo (optional):</label>
+                <input type="file" id="companyLogo" name="company_logo" accept="image/png, image/jpeg">
+            </div>
+            
+            <div class="info-section">
+                <h3>How to Use This Tool</h3>
+                <ul>
+                    <li>Use the provided Excel template with 15 screenshot columns</li>
+                    <li>Add vulnerability details in each row</li>
+                    <li>Insert screenshot filenames in the respective "Screenshot X" columns</li>
+                    <li>Ensure your steps are separated by line breaks (Enter/Return key)</li>
+                    <li>The system will automatically map screenshots to steps in the final report</li>
+                    <li>For each vulnerability, the number of steps should match the number of screenshots</li>
+                </ul>
+            </div>
+            
+            <button type="button" onclick="generateReport()" id="generateReportBtn">Generate Report</button>
+        </form>
+        
+        <div id="status" class="status"></div>
+        <div id="validationErrors" class="error-list" style="display: none;">
+            <h4>Validation Errors</h4>
+            <ul id="errorList"></ul>
+        </div>
+    </div>
+    
+    <script>
+	const API_BASE_URL = window.location.origin;
+        function setStatus(message, isError = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerText = message;
+            statusDiv.style.backgroundColor = isError ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 255, 0, 0.1)';
+        }
+        
+        function showValidationErrors(errors) {
+            const errorDiv = document.getElementById('validationErrors');
+            const errorList = document.getElementById('errorList');
+            
+            // Clear previous errors
+            errorList.innerHTML = '';
+            
+            if (errors && errors.length > 0) {
+                errors.forEach(error => {
+                    const li = document.createElement('li');
+                    li.textContent = `Row ${error.row}: ${error.message}`;
+                    errorList.appendChild(li);
+                });
+                
+                errorDiv.style.display = 'block';
+            } else {
+                errorDiv.style.display = 'none';
+            }
+        }
+        
+        function generateReport() {
+            const fileInput = document.getElementById('excelFile');
+            const assessmentFileInput = document.getElementById('assessmentFile');
+            const clientNameInput = document.getElementById('clientName');
+            const pocImagesInput = document.getElementById('pocImages');
+            const companyLogoInput = document.getElementById('companyLogo');
+            const clientName = clientNameInput.value;
+            const file = fileInput.files[0];
+            const assessmentFile = assessmentFileInput.files[0];
+            const pocImagesFile = pocImagesInput.files[0];
+            const companyLogoFile = companyLogoInput.files[0];
+            
+            if (!file) {
+                setStatus('Please select a Vulnerabilities Excel file', true);
+                return;
+            }
+            if (!assessmentFile) {
+                setStatus('Please select an Assessment Detail Excel file', true);
+                return;
+            }
+            
+            setStatus('Generating report, please wait...');
+            document.getElementById('generateReportBtn').disabled = true;
+            document.getElementById('validationErrors').style.display = 'none';
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('assessment_file', assessmentFile);
+            formData.append('client_name', clientName);
+            if (pocImagesFile) {
+                formData.append('poc_images', pocImagesFile);
+            }
+            if (companyLogoFile) {
+                formData.append('company_logo', companyLogoFile);
+            }
+            
+            fetch(`${API_BASE_URL}/type2/generate-report/`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                document.getElementById('generateReportBtn').disabled = false;
+                
+                // Check for validation errors
+                const validationErrors = response.headers.get('X-Validation-Errors');
+                if (validationErrors) {
+                    try {
+                        const errors = JSON.parse(validationErrors);
+                        if (errors && errors.length > 0) {
+                            showValidationErrors(errors);
+                            setStatus('Report generated with validation warnings. Please review the errors below.', true);
+                        }
+                    } catch (e) {
+                        console.error('Error parsing validation errors:', e);
+                    }
+                }
+                
+                if (response.ok) {
+                    if (!validationErrors || validationErrors === '[]') {
+                        setStatus('Report generated successfully! Downloading...');
+                    }
+                    return response.blob();
+                }
+                return response.json().then(error => {
+                    throw new Error(error.detail || 'Error generating report');
+                });
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${clientName || 'Client'} VAPT Report.docx`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                setStatus('Error: ' + error.message, true);
+                document.getElementById('generateReportBtn').disabled = false;
+            });
+        }
+    </script>
+</body>
+</html> 
