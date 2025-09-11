@@ -14,7 +14,7 @@ The report generator allows users to add their company logo to the generated rep
 1. Start the FastAPI backend server:
    ```
    cd Automation2.0/backend
-   uvicorn main:app --reload --port 8004
+   uvicorn main:app --reload --port 8000
    ```
 
 2. Use the `setup_default_logo.py` script to upload the logo:

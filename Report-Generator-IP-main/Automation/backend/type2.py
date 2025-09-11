@@ -70,7 +70,10 @@ severity_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Informationa
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
     try:
-        file_location = os.path.join(UPLOAD_DIR, file.filename)
+        # Sanitize filename to avoid traversal/XSS
+        original_name = file.filename or "upload.bin"
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", original_name)
+        file_location = os.path.join(UPLOAD_DIR, safe_name)
         with open(file_location, "wb") as f:
             f.write(await file.read())
         return JSONResponse(content={"filename": file.filename}, status_code=200)
@@ -91,10 +94,14 @@ async def upload_screenshots(files: list[UploadFile] = File(...)):
             if not file.content_type.startswith('image/'):
                 continue
                 
-            file_location = os.path.join(UPLOAD_DIR, "screenshots", file.filename)
+            original_name = file.filename or "image.png"
+            safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", original_name)
+            screenshots_dir = os.path.join(UPLOAD_DIR, "screenshots")
+            os.makedirs(screenshots_dir, exist_ok=True)
+            file_location = os.path.join(screenshots_dir, safe_name)
             with open(file_location, "wb") as f:
                 f.write(await file.read())
-            saved_files.append(file.filename)
+            saved_files.append(safe_name)
         
         return JSONResponse(
             content={"filenames": saved_files},

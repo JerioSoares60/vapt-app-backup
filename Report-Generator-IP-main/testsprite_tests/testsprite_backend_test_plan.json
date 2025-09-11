@@ -1,0 +1,32 @@
+[
+  {
+    "id": "TC001",
+    "title": "verify_azure_sso_authentication_flow",
+    "description": "Test the Azure SSO login initiation, callback handling, and session establishment with role-based access control to ensure secure authentication."
+  },
+  {
+    "id": "TC002",
+    "title": "validate_type1_report_generation_workflow",
+    "description": "Test the complete Type-1 report generation process including Excel file upload, screenshot upload, and report generation with correct embedding of data and images."
+  },
+  {
+    "id": "TC003",
+    "title": "validate_type2_report_generation_workflow",
+    "description": "Test the complete Type-2 report generation process including Excel file upload, screenshot upload, and report generation with correct embedding of data and images."
+  },
+  {
+    "id": "TC004",
+    "title": "dashboard_access_and_data_handling",
+    "description": "Verify that the dashboard interface is accessible only to authorized users and that dataset uploads, listing, downloading, project history retrieval, updates, and audit log retrieval function correctly."
+  },
+  {
+    "id": "TC005",
+    "title": "health_check_endpoint_functionality",
+    "description": "Test the health check endpoint to ensure it reliably reports the service and database connectivity status with correct response structure."
+  },
+  {
+    "id": "TC006",
+    "title": "static_file_serving_endpoints",
+    "description": "Verify that static files and automation files are served correctly via their respective endpoints and that the report formats page loads successfully."
+  }
+]

@@ -1,0 +1,608 @@
+{
+  "meta": {
+    "project": "VAPT Report Generator",
+    "date": "2025-08-31",
+    "prepared_by": "Software Development Manager"
+  },
+  "product_overview": "The VAPT Report Generator is a web-based application designed to automate the creation of Vulnerability Assessment and Penetration Testing (VAPT) reports. It utilizes Excel templates to generate comprehensive Word documents integrating screenshots and detailed vulnerability data. The system features Azure SSO authentication, role-based access controls, and an interactive dashboard for project analytics and management.",
+  "core_goals": [
+    "Automate VAPT report generation from standardized Excel templates with embedded screenshots.",
+    "Secure the application with Azure Active Directory Single Sign-On and session-based role management.",
+    "Provide an interactive dashboard for monitoring vulnerability statistics, project tracking, and historical analysis.",
+    "Enable support for multiple report formats and flexible template processing.",
+    "Ensure system reliability and security with audit logging, health monitoring, and encrypted session handling."
+  ],
+  "key_features": [
+    "Azure SSO integration for secure user authentication and role-based access control.",
+    "Type-1 and Type-2 VAPT report generation workflows including Excel file uploads, screenshot management, and Word report output.",
+    "Comprehensive dashboard system offering project history, analytics visualization, dataset uploads, and audit log access.",
+    "Health check and status endpoints for monitoring application and database health.",
+    "Static file serving for frontend assets and automation resources.",
+    "Automated severity classification of vulnerabilities based on CVSS scoring.",
+    "Secure session management with encrypted cookies and restricted domain access.",
+    "Support for multi-format Excel templates and various output report formats."
+  ],
+  "user_flow_summary": [
+    "User navigates to the login page and authenticates via Azure SSO; upon success, the session is established with role-based permissions.",
+    "Authorized users access the dashboard to upload datasets, view project histories, and review vulnerability analytics via visual charts.",
+    "Users select the desired report type (Type-1 or Type-2) and upload Excel files along with related screenshots.",
+    "The system processes the Excel template and screenshots, generating a formatted Word report available for download.",
+    "Users can check application health and status via the health endpoint to ensure system availability.",
+    "Users log out securely, ending their session and redirecting back to the login page."
+  ],
+  "validation_criteria": [
+    "Successful integration and validation of Azure SSO authentication flow including session and role management.",
+    "Reports are accurately generated from Excel templates with all required data fields and screenshots properly embedded.",
+    "Dashboard data correctly displays project history, vulnerability counts, and audit logs with responsive UI elements.",
+    "File uploads (Excel and images) are validated for correct format, size limits, and security compliance.",
+    "API endpoints respond with expected status codes and data structures as documented.",
+    "System health endpoints reliably report service and database connectivity status.",
+    "Access control enforcement restricts dashboard and report generation to authorized users only.",
+    "Audit logs accurately track user activities, including login, file uploads, report generation, and dashboard interactions."
+  ],
+  "code_summary": {
+    "tech_stack": [
+      "Python",
+      "FastAPI",
+      "SQLite/PostgreSQL",
+      "Azure SSO",
+      "HTML/CSS/JavaScript",
+      "Jinja2",
+      "pandas",
+      "python-docx",
+      "matplotlib",
+      "SQLAlchemy",
+      "uvicorn",
+      "gunicorn"
+    ],
+    "features": [
+      {
+        "name": "Authentication System",
+        "description": "Azure SSO integration with session management and role-based access control",
+        "files": [
+          "auth.py",
+          "app.py",
+          "app-aws.py"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "info": {
+            "title": "VAPT Authentication API",
+            "version": "1.0.0"
+          },
+          "paths": {
+            "/login": {
+              "get": {
+                "summary": "Login page",
+                "responses": {
+                  "200": {
+                    "description": "Login page HTML"
+                  }
+                }
+              }
+            },
+            "/auth/login": {
+              "post": {
+                "summary": "Initiate Azure SSO login",
+                "responses": {
+                  "302": {
+                    "description": "Redirect to Azure SSO"
+                  }
+                }
+              }
+            },
+            "/auth/callback": {
+              "get": {
+                "summary": "Azure SSO callback",
+                "responses": {
+                  "302": {
+                    "description": "Redirect after authentication"
+                  }
+                }
+              }
+            },
+            "/logout": {
+              "get": {
+                "summary": "Logout user",
+                "responses": {
+                  "302": {
+                    "description": "Redirect to login"
+                  }
+                }
+              }
+            },
+            "/me": {
+              "get": {
+                "summary": "Get current user info",
+                "responses": {
+                  "200": {
+                    "description": "User information"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Type-1 Report Generation",
+        "description": "Generate comprehensive VAPT reports from Excel templates with screenshot integration",
+        "files": [
+          "Automation/backend/main.py",
+          "Automation/test.html"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "info": {
+            "title": "VAPT Type-1 Report API",
+            "version": "1.0.0"
+          },
+          "paths": {
+            "/type1/": {
+              "get": {
+                "summary": "Type-1 report interface",
+                "responses": {
+                  "200": {
+                    "description": "Report generation page"
+                  }
+                }
+              }
+            },
+            "/type1/upload/": {
+              "post": {
+                "summary": "Upload Excel file",
+                "requestBody": {
+                  "content": {
+                    "multipart/form-data": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "format": "binary"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "File uploaded successfully"
+                  }
+                }
+              }
+            },
+            "/type1/upload-screenshots/": {
+              "post": {
+                "summary": "Upload screenshot files",
+                "requestBody": {
+                  "content": {
+                    "multipart/form-data": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "binary"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Screenshots uploaded successfully"
+                  }
+                }
+              }
+            },
+            "/type1/generate-report/": {
+              "post": {
+                "summary": "Generate VAPT report",
+                "requestBody": {
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "client_name": {
+                            "type": "string"
+                          },
+                          "client_code": {
+                            "type": "string"
+                          },
+                          "project_name": {
+                            "type": "string"
+                          },
+                          "assessment_date": {
+                            "type": "string"
+                          },
+                          "report_type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Report generated successfully"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Type-2 Report Generation",
+        "description": "Alternative report format with different template structure",
+        "files": [
+          "Automation/backend/type2.py",
+          "Automation/test2.html"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "info": {
+            "title": "VAPT Type-2 Report API",
+            "version": "1.0.0"
+          },
+          "paths": {
+            "/type2/": {
+              "get": {
+                "summary": "Type-2 report interface",
+                "responses": {
+                  "200": {
+                    "description": "Report generation page"
+                  }
+                }
+              }
+            },
+            "/type2/upload/": {
+              "post": {
+                "summary": "Upload Excel file",
+                "requestBody": {
+                  "content": {
+                    "multipart/form-data": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "format": "binary"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "File uploaded successfully"
+                  }
+                }
+              }
+            },
+            "/type2/upload-screenshots/": {
+              "post": {
+                "summary": "Upload screenshot files",
+                "requestBody": {
+                  "content": {
+                    "multipart/form-data": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "binary"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Screenshots uploaded successfully"
+                  }
+                }
+              }
+            },
+            "/type2/generate-report/": {
+              "post": {
+                "summary": "Generate VAPT report",
+                "requestBody": {
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "client_name": {
+                            "type": "string"
+                          },
+                          "client_code": {
+                            "type": "string"
+                          },
+                          "project_name": {
+                            "type": "string"
+                          },
+                          "assessment_date": {
+                            "type": "string"
+                          },
+                          "report_type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Report generated successfully"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Dashboard System",
+        "description": "Interactive dashboard for vulnerability analytics and project tracking with restricted access",
+        "files": [
+          "templates/dashboard.html",
+          "Automation/backend/main.py"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "info": {
+            "title": "VAPT Dashboard API",
+            "version": "1.0.0"
+          },
+          "paths": {
+            "/dashboard": {
+              "get": {
+                "summary": "Dashboard interface (restricted access)",
+                "responses": {
+                  "200": {
+                    "description": "Dashboard page"
+                  },
+                  "302": {
+                    "description": "Redirect to login if not authorized"
+                  }
+                }
+              }
+            },
+            "/type1/dashboard/upload": {
+              "post": {
+                "summary": "Upload dashboard dataset",
+                "requestBody": {
+                  "content": {
+                    "multipart/form-data": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string",
+                            "format": "binary"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "project_name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Dataset uploaded successfully"
+                  }
+                }
+              }
+            },
+            "/type1/dashboard-datasets": {
+              "get": {
+                "summary": "List dashboard datasets",
+                "responses": {
+                  "200": {
+                    "description": "List of datasets"
+                  }
+                }
+              }
+            },
+            "/type1/dashboard-datasets/{dataset_id}/file": {
+              "get": {
+                "summary": "Download dashboard dataset",
+                "parameters": [
+                  {
+                    "name": "dataset_id",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                      "type": "integer"
+                    }
+                  }
+                ],
+                "responses": {
+                  "200": {
+                    "description": "Dataset file"
+                  }
+                }
+              }
+            },
+            "/type1/project-history": {
+              "get": {
+                "summary": "Get project history data",
+                "responses": {
+                  "200": {
+                    "description": "Project history information"
+                  }
+                }
+              }
+            },
+            "/type1/project-history/update": {
+              "post": {
+                "summary": "Update project history",
+                "requestBody": {
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "project_data": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Project history updated"
+                  }
+                }
+              }
+            },
+            "/type1/audit-logs": {
+              "get": {
+                "summary": "Get audit logs",
+                "responses": {
+                  "200": {
+                    "description": "Audit log entries"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Health Check",
+        "description": "Application health monitoring and status endpoints",
+        "files": [
+          "app.py",
+          "app-aws.py"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "info": {
+            "title": "VAPT Health Check API",
+            "version": "1.0.0"
+          },
+          "paths": {
+            "/health": {
+              "get": {
+                "summary": "Health check endpoint",
+                "responses": {
+                  "200": {
+                    "description": "Service health status",
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string"
+                            },
+                            "service": {
+                              "type": "string"
+                            },
+                            "database": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Static File Serving",
+        "description": "Serve static assets and frontend files",
+        "files": [
+          "app.py",
+          "app-aws.py"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "info": {
+            "title": "VAPT Static Files API",
+            "version": "1.0.0"
+          },
+          "paths": {
+            "/static/{file_path}": {
+              "get": {
+                "summary": "Serve static files",
+                "parameters": [
+                  {
+                    "name": "file_path",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                ],
+                "responses": {
+                  "200": {
+                    "description": "Static file content"
+                  }
+                }
+              }
+            },
+            "/Automation/{file_path}": {
+              "get": {
+                "summary": "Serve automation files",
+                "parameters": [
+                  {
+                    "name": "file_path",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                ],
+                "responses": {
+                  "200": {
+                    "description": "Automation file content"
+                  }
+                }
+              }
+            },
+            "/report_formats.html": {
+              "get": {
+                "summary": "Report formats page",
+                "responses": {
+                  "200": {
+                    "description": "Report formats HTML page"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}
