@@ -34,7 +34,7 @@ AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
 AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
 AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
 # For EC2 deployment, use the environment variable or default to localhost
-AZURE_REDIRECT_URI = os.getenv("AZURE_REDIRECT_URI", "http://localhost:8000/auth/callback")
+AZURE_REDIRECT_URI = os.getenv("AZURE_REDIRECT_URI", "https://13.202.112.84/auth/callback")
 print(f"DEBUG: AZURE_REDIRECT_URI = {AZURE_REDIRECT_URI}")
 AZURE_AUTHORITY = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}"
 AZURE_AUTH_ENDPOINT = f"{AZURE_AUTHORITY}/oauth2/v2.0/authorize"
