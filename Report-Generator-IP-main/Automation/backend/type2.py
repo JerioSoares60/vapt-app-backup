@@ -356,6 +356,21 @@ def parse_vulnerabilities_excel(file_path):
                     # Split by comma, semicolon, or newline
                     associated_cves = [c.strip() for c in re.split(r'[\n,;]', cve_str) if c.strip()]
                 
+                # Get Reference Link
+                reference_link = ""
+                # Robustly find the column for Reference Link (case-insensitive, ignore spaces and apostrophes)
+                ref_link_col = None
+                for col in df.columns:
+                    if col.strip().replace("'", "").replace(' ', '').lower() in [
+                        'referencelink', 'referencelinks', 'refrencelink', 'refrencelinks', 'referencelink']:
+                        ref_link_col = col
+                        break
+                if ref_link_col and pd.notna(row.get(ref_link_col, None)):
+                    ref_link_str = str(row.get(ref_link_col, '')).strip()
+                    if ref_link_str and ref_link_str.lower() not in ['', 'nan', 'none', 'null']:
+                        reference_link = ref_link_str
+                        print(f"[DEBUG] Row {index} Reference Link: {reference_link}")
+                
                 vulnerability = {
                     'name': vuln_name,
                     'description': description,
@@ -368,6 +383,7 @@ def parse_vulnerabilities_excel(file_path):
                     'steps_with_screenshots': steps_with_screenshots,
                     'sr_no': str(row.get('Sr No', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
                     'associated_cves': associated_cves,
+                    'reference_link': reference_link,
                     'is_no_vuln_box': is_no_vuln_box,
                 }
                 
@@ -790,6 +806,28 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
         run.font.name = 'Altone Trial'
         run.font.size = Pt(11)
         run.font.bold = False
+    
+    # Add Reference Link after Associated CVEs (only if it exists and is not empty)
+    reference_link = vulnerability.get('reference_link', '')
+    if reference_link and reference_link.strip():
+        # Add a new paragraph for the reference link
+        ref_para = cell.add_paragraph()
+        ref_para.paragraph_format.space_before = Pt(6)
+        ref_run = ref_para.add_run("Reference Link: ")
+        ref_run.font.name = 'Altone Trial'
+        ref_run.font.size = Pt(12)
+        ref_run.font.bold = True
+        ref_run.font.color.rgb = RGBColor(font_r, font_g, font_b)
+        
+        # Add the actual link
+        link_para = cell.add_paragraph(reference_link)
+        link_para.paragraph_format.left_indent = Pt(20)
+        link_para.paragraph_format.space_before = Pt(3)
+        for run in link_para.runs:
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(11)
+            run.font.bold = False
+            run.font.color.rgb = RGBColor(0, 0, 255)  # Blue color for links
     
     # Row for PoC steps
     row = table.rows[len(row_labels) - 1]
@@ -2045,7 +2083,7 @@ def group_vulnerabilities(vulnerabilities):
             )
             print(f"    Regular vuln key: {key}")
         if key not in grouped:
-            grouped[key] = {**vuln, 'ips': [], 'associated_cves': [], 'steps_with_screenshots': []}
+            grouped[key] = {**vuln, 'ips': [], 'associated_cves': [], 'reference_links': [], 'steps_with_screenshots': []}
             print(f"    Created new group for key")
         else:
             print(f"    Added to existing group for key")
@@ -2054,9 +2092,20 @@ def group_vulnerabilities(vulnerabilities):
             grouped[key]['ips'].extend([ip.strip() for ip in str(vuln.get('ip')).split(',') if ip.strip()])
         grouped[key]['steps_with_screenshots'].extend(vuln.get('steps_with_screenshots', []))
         grouped[key]['associated_cves'].extend(vuln.get('associated_cves', []))
+        # Add reference link if it exists and is not empty
+        ref_link = vuln.get('reference_link', '')
+        if ref_link and ref_link.strip():
+            grouped[key]['reference_links'].append(ref_link)
     for g in grouped.values():
         g['ip'] = ', '.join(sorted(set(g['ips'])))
         g['associated_cves'] = sorted(set(g['associated_cves']))
+        # Process reference links - keep unique ones
+        g['reference_links'] = list(set(g['reference_links']))
+        # Set the main reference_link field to the first one (for backward compatibility)
+        if g['reference_links']:
+            g['reference_link'] = g['reference_links'][0]
+        else:
+            g['reference_link'] = ''
     print(f"After grouping - {len(grouped)} final vulnerabilities:")
     for g in grouped.values():
         print(f"SR: {g['sr_no']}, Name: {g['name']}, is_no_vuln_box: {g['is_no_vuln_box']}, IPs: {g['ip']}")
