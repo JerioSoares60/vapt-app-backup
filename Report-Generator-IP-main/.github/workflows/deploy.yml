@@ -1,0 +1,56 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        port: 22
+        script: |
+          # Navigate to the application directory
+          cd /opt/vapt-app
+          
+          # Create new release directory with timestamp
+          RELEASE_DIR="/opt/vapt-app/releases/$(date +%Y%m%d%H%M%S)"
+          echo "Creating new release directory: $RELEASE_DIR"
+          
+          # Clone the latest code
+          sudo -u vaptapp bash -lc "export HOME=/home/vaptapp; git clone --depth=1 git@github.com:JerioSoares60/vapt-app-backup.git $RELEASE_DIR"
+          
+          # Update the current symlink
+          sudo -u vaptapp bash -lc "ln -sfn $RELEASE_DIR /opt/vapt-app/current"
+          
+          # Install/update Python dependencies
+          sudo -u vaptapp /opt/vapt-venv/bin/pip install -r /opt/vapt-app/current/Report-Generator-IP-main/requirements-aws.txt
+          
+          # Restart the application service
+          sudo systemctl restart vapt-app
+          
+          # Wait a moment for the service to start
+          sleep 5
+          
+          # Check if the service is running
+          if sudo systemctl is-active --quiet vapt-app; then
+            echo "✅ Deployment successful! Service is running."
+            sudo systemctl status vapt-app --no-pager
+          else
+            echo "❌ Deployment failed! Service is not running."
+            sudo journalctl -u vapt-app -n 20 --no-pager
+            exit 1
+          fi
+          
+          # Clean up old releases (keep last 5)
+          cd /opt/vapt-app/releases
+          ls -t | tail -n +6 | xargs -r rm -rf
+          echo "Cleaned up old releases"
