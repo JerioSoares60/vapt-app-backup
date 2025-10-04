@@ -52,7 +52,7 @@ def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 @router.post("/auth/login")
-async def auth_login(request: Request, email: str | None = Form(default=None)):
+async def auth_login(request: Request, email: Optional[str] = Form(default=None)):
     # Email is optional for initiating OAuth; validate only when provided
     if email:
         try:
@@ -75,7 +75,7 @@ async def auth_login(request: Request, email: str | None = Form(default=None)):
 # Some test harnesses initiate the OAuth flow using GET instead of POST.
 # Provide a GET alias that behaves the same (without requiring an email).
 @router.get("/auth/login")
-async def auth_login_get(request: Request, email: str | None = None):
+async def auth_login_get(request: Request, email: Optional[str] = None):
     if email:
         try:
             EmailForm(email=email)
@@ -184,7 +184,7 @@ def __test_set_session(request: Request, email: str = Form("developer@cybersmith
 
 # Compatibility endpoint expected by some test harnesses
 @router.post("/api/auth/azure_sso")
-def api_auth_azure_sso(request: Request, email: str | None = Form(default=None)):
+def api_auth_azure_sso(request: Request, email: Optional[str] = Form(default=None)):
     # Reuse the same redirect behavior as /auth/login
     params = {
         "client_id": AZURE_CLIENT_ID,
