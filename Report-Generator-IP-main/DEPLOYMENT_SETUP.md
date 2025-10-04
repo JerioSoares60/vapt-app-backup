@@ -8,6 +8,9 @@ This guide explains how to set up automated deployment from GitHub to your AWS E
 2. SSH access to your EC2 instance
 3. GitHub repository with your code
 
+
+
+
 ## Setup Steps
 
 ### 1. Configure GitHub Secrets
