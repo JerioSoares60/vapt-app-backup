@@ -242,11 +242,26 @@ def parse_vulnerabilities_excel(file_path):
         
         # Clean column names by stripping whitespace
         df.columns = df.columns.str.strip()
+
+        # Forward-fill identification/summary columns so multiple rows under the
+        # same IP can omit repeated metadata (Hostname, counts etc.)
+        ffill_cols = [
+            'Hostname', 'IP Type', 'VAPT Status', 'Critical', 'High',
+            'Medium', 'Low', 'Informational', 'Total'
+        ]
+        for col in ffill_cols:
+            if col in df.columns:
+                df[col] = df[col].ffill()
         
         vulnerabilities = []
         
         for index, row in df.iterrows():
             try:
+                # Skip completely blank lines that do not carry a vulnerability entry
+                vn_raw = str(row.get('Vulnerability Name', '')).strip()
+                sr_raw = str(row.get('Sr No', '')).strip()
+                if vn_raw == '' and sr_raw == '':
+                    continue
                 # Extract CVSS score and convert to float
                 cvss_score = None
                 if 'CVSS Score' in row:
@@ -385,6 +400,7 @@ def parse_vulnerabilities_excel(file_path):
                     'associated_cves': associated_cves,
                     'reference_link': reference_link,
                     'is_no_vuln_box': is_no_vuln_box,
+                    'row_order': int(index),
                 }
                 
                 vulnerabilities.append(vulnerability)
@@ -963,6 +979,12 @@ def generate_word_report(
         if not (doc.paragraphs and doc.paragraphs[-1].text.strip() == ''):
             doc.add_page_break()
 
+        # Ensure vulnerabilities are ordered by their original row order if present
+        try:
+            vulnerabilities.sort(key=lambda v: v.get('row_order', 0))
+        except Exception:
+            pass
+
         # Define chart variables before try block
         severity_counts = count_vulnerabilities_by_severity(vulnerabilities)
         # Change 'Unknown' to 'No Vulnerability' in chart code
@@ -990,6 +1012,14 @@ def generate_word_report(
                     '#808080'  # No Vulnerability
                     for s in severities
                 ]
+                if len(severities) == 0:
+                    # Nothing to plot; create an empty placeholder image
+                    plt.figure(figsize=(8.5, 4.5))
+                    plt.text(0.5, 0.5, 'No data', ha='center', va='center')
+                    plt.axis('off')
+                    plt.savefig(output_path)
+                    plt.close()
+                    return output_path
                 sorted_severities, sorted_counts, sorted_colors = zip(*sorted(
                     zip(severities, counts, colors),
                     key=lambda x: severity_order.get(x[0], 5)
@@ -1020,6 +1050,13 @@ def generate_word_report(
                 total_findings = sum(counts)
                 color_map = {severity: get_severity_colors(severity)['row1_bg'] for severity in severity_order.keys()}
                 color_map['No Vulnerability'] = '#808080'
+                if len(severities) == 0:
+                    plt.figure(figsize=(8.5, 4.5))
+                    plt.text(0.5, 0.5, 'No data', ha='center', va='center')
+                    plt.axis('off')
+                    plt.savefig(output_path)
+                    plt.close()
+                    return output_path
                 sorted_severities, sorted_counts = zip(*sorted(cleaned_counts.items(), key=lambda item: severity_order.get(item[0], 5)))
                 sorted_colors = [color_map.get(s, '#808080') for s in sorted_severities]
                 fig, ax = plt.subplots(figsize=(8.5, 4.5))
@@ -1093,7 +1130,12 @@ def generate_word_report(
             except (ValueError, TypeError):
                 return 0
         
-        vulnerabilities.sort(key=sort_key, reverse=True)
+        # Keep per-IP grouping contiguous in the final document: first order by row input order,
+        # then by severity within the same IP block
+        try:
+            vulnerabilities.sort(key=lambda v: (str(v.get('ip','')), v.get('row_order', 0)))
+        except Exception:
+            vulnerabilities.sort(key=sort_key, reverse=True)
         
         # Debug: Print vulnerabilities after sorting
         print(f"After sorting - Total vulnerabilities: {len(vulnerabilities)}")
@@ -1355,9 +1397,12 @@ async def generate_report(
             f.write(await assessment_file.read())
         print(f"Saved uploaded assessment file to: {assessment_file_location}")
         # No dashboard ingestion here; dashboard is a separate feature
-        # Handle POC images ZIP
+        # Handle POC images ZIP (accept only .zip)
         poc_images_dir = None
         if poc_images is not None:
+            poc_name = (poc_images.filename or '').lower()
+            if not poc_name.endswith('.zip'):
+                raise HTTPException(status_code=400, detail="POC screenshots must be uploaded as a .zip file")
             tmpdirname = tempfile.mkdtemp()
             zip_path = os.path.join(tmpdirname, poc_images.filename)
             with open(zip_path, 'wb') as f:
@@ -1614,10 +1659,15 @@ def index_images_from_poc_zip(root_dir):
         print("[ERROR] 'POC Screenshots' folder not found in ZIP.")
         return image_map
 
-    # Walk through severity folders (Critical, High, etc.)
-    for severity in os.listdir(screenshots_root):
-        severity_path = os.path.join(screenshots_root, severity)
-        if os.path.isdir(severity_path):
+    # Expected structure: POC Screenshots/<IP>/<Severity>/<VUL-XXX>/*.png
+    for ip_folder in os.listdir(screenshots_root):
+        ip_path = os.path.join(screenshots_root, ip_folder)
+        if not os.path.isdir(ip_path):
+            continue
+        for severity in os.listdir(ip_path):
+            severity_path = os.path.join(ip_path, severity)
+            if not os.path.isdir(severity_path):
+                continue
             for vuln_id in os.listdir(severity_path):
                 vuln_path = os.path.join(severity_path, vuln_id)
                 if os.path.isdir(vuln_path) and vuln_id.lower().startswith("vul-"):
