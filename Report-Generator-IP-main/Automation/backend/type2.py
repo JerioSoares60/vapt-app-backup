@@ -1879,17 +1879,25 @@ def insert_ip_summary_table_colored(doc, ip_summary_list):
     # Data rows
     for idx, row in enumerate(ip_summary_list, 1):
         cells = table.add_row().cells
+        # Ensure numeric columns are integers (no decimals)
+        def as_int_str(v):
+            try:
+                if isinstance(v, str) and v.strip() == '':
+                    return '0'
+                return str(int(float(v)))
+            except Exception:
+                return str(v)
         values = [
             str(idx),
             str(row.get("Hostname", "")),
             str(row.get("IP Type", "")),
             str(row.get("VAPT Status", "")),
-            str(row.get("Critical", "")),
-            str(row.get("High", "")),
-            str(row.get("Medium", "")),
-            str(row.get("Low", "")),
-            str(row.get("Informational", row.get("Information", ""))),
-            str(row.get("Total", ""))
+            as_int_str(row.get("Critical", 0)),
+            as_int_str(row.get("High", 0)),
+            as_int_str(row.get("Medium", 0)),
+            as_int_str(row.get("Low", 0)),
+            as_int_str(row.get("Informational", row.get("Information", 0))),
+            as_int_str(row.get("Total", 0))
         ]
         for i, value in enumerate(values):
             cells[i].text = value
@@ -2057,7 +2065,15 @@ def compute_ip_summary_totals(ip_list):
     for row in ip_list:
         for key in totals:
             try:
-                totals[key] += int(row.get(key, 0))
+                # Accept strings like '3.0' and coerce to int to drop decimals
+                value = row.get(key, 0)
+                if isinstance(value, str):
+                    value = value.strip()
+                    if value == '':
+                        value = 0
+                    else:
+                        value = float(value)
+                totals[key] += int(float(value))
             except Exception:
                 totals[key] += 0
     return totals
