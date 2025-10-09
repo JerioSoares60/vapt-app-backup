@@ -247,7 +247,7 @@ def parse_vulnerabilities_excel(file_path):
         # same IP can omit repeated metadata (Hostname, counts etc.)
         ffill_cols = [
             'Hostname', 'IP Type', 'VAPT Status', 'Critical', 'High',
-            'Medium', 'Low', 'Informational', 'Total'
+            'Medium', 'Low', 'Informational', 'Total', 'ReportedBy', 'Project', 'Severity'
         ]
         for col in ffill_cols:
             if col in df.columns:
@@ -386,6 +386,11 @@ def parse_vulnerabilities_excel(file_path):
                         reference_link = ref_link_str
                         print(f"[DEBUG] Row {index} Reference Link: {reference_link}")
                 
+                # Get new dashboard columns
+                reported_by = str(row.get('ReportedBy', '')).strip() if pd.notna(row.get('ReportedBy', None)) else ''
+                project = str(row.get('Project', '')).strip() if pd.notna(row.get('Project', None)) else ''
+                severity_level = str(row.get('Severity', '')).strip() if pd.notna(row.get('Severity', None)) else ''
+                
                 vulnerability = {
                     'name': vuln_name,
                     'description': description,
@@ -399,6 +404,9 @@ def parse_vulnerabilities_excel(file_path):
                     'sr_no': str(row.get('Sr No', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
                     'associated_cves': associated_cves,
                     'reference_link': reference_link,
+                    'reported_by': reported_by,
+                    'project': project,
+                    'severity_level': severity_level,
                     'is_no_vuln_box': is_no_vuln_box,
                     'row_order': int(index),
                 }
@@ -1368,6 +1376,83 @@ def insert_steps_with_images(doc, vulnerability, image_map):
 def get_script_dir():
     return os.path.dirname(os.path.realpath(__file__))
 
+async def auto_upload_to_dashboard(vulnerabilities, client_name, db, request):
+    """
+    Automatically upload parsed vulnerability data to dashboard.
+    Creates a dashboard dataset with the parsed data for monitoring.
+    """
+    try:
+        # Import dashboard models
+        from db import DashboardDataset, AuditLog
+        
+        # Create a CSV-like data structure for dashboard
+        dashboard_data = []
+        for vuln in vulnerabilities:
+            if not vuln.get('is_no_vuln_box'):  # Skip "No Vulnerability" entries
+                dashboard_data.append({
+                    'IP': vuln.get('ip', ''),
+                    'Vulnerability': vuln.get('name', ''),
+                    'Severity': vuln.get('severity', ''),
+                    'CVSS': vuln.get('cvss', ''),
+                    'ReportedBy': vuln.get('reported_by', ''),
+                    'Project': vuln.get('project', ''),
+                    'SeverityLevel': vuln.get('severity_level', ''),
+                    'Description': vuln.get('description', ''),
+                    'Impact': vuln.get('impact', ''),
+                    'Remediation': vuln.get('remediation', ''),
+                    'SrNo': vuln.get('sr_no', ''),
+                    'AssociatedCVEs': ', '.join(vuln.get('associated_cves', [])),
+                    'ReferenceLink': vuln.get('reference_link', '')
+                })
+        
+        if not dashboard_data:
+            print("No vulnerability data to upload to dashboard")
+            return
+        
+        # Create a temporary CSV file
+        import csv
+        import tempfile
+        import pandas as pd
+        
+        # Create DataFrame and save as CSV
+        df = pd.DataFrame(dashboard_data)
+        temp_csv_path = os.path.join(tempfile.gettempdir(), f"dashboard_upload_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv")
+        df.to_csv(temp_csv_path, index=False)
+        
+        # Create dashboard dataset entry
+        user = request.session.get('user') or {} if request else {}
+        ds = DashboardDataset(
+            title=f"{client_name} VAPT Data - {datetime.now().strftime('%Y-%m-%d')}",
+            project_name=client_name,
+            file_path=temp_csv_path,
+            uploaded_by_email=user.get('email', 'system'),
+            uploaded_by_name=user.get('name', 'System Auto-Upload')
+        )
+        db.add(ds)
+        
+        # Add audit log
+        db.add(AuditLog(
+            user_email=user.get('email', 'system'),
+            user_name=user.get('name', 'System Auto-Upload'),
+            action='auto-dashboard-upload',
+            metadata_json=json.dumps({
+                'client_name': client_name,
+                'vulnerability_count': len(dashboard_data),
+                'source': 'type2-report-generation'
+            }),
+            ip_address=request.client.host if request and request.client else None,
+            user_agent=request.headers.get('user-agent') if request else None
+        ))
+        
+        db.commit()
+        db.refresh(ds)
+        
+        print(f"Successfully auto-uploaded {len(dashboard_data)} vulnerabilities to dashboard (ID: {ds.id})")
+        
+    except Exception as e:
+        print(f"Error in auto_upload_to_dashboard: {e}")
+        raise
+
 @app.post("/generate-report/")
 async def generate_report(
     file: UploadFile = File(...),  # Vulnerability file
@@ -1499,6 +1584,14 @@ async def generate_report(
             db.commit()
         except Exception:
             pass
+        
+        # Automatically upload parsed data to dashboard
+        try:
+            await auto_upload_to_dashboard(vulnerabilities, client_name, db, request)
+        except Exception as e:
+            print(f"Warning: Failed to auto-upload to dashboard: {e}")
+            # Don't fail the report generation if dashboard upload fails
+        
         return FileResponse(
             path=output_path,
             filename=report_filename,
@@ -2133,7 +2226,7 @@ def group_vulnerabilities(vulnerabilities):
             )
             print(f"    Regular vuln key: {key}")
         if key not in grouped:
-            grouped[key] = {**vuln, 'ips': [], 'associated_cves': [], 'reference_links': [], 'steps_with_screenshots': []}
+            grouped[key] = {**vuln, 'ips': [], 'associated_cves': [], 'reference_links': [], 'steps_with_screenshots': [], 'reported_by_list': [], 'project_list': [], 'severity_level_list': []}
             print(f"    Created new group for key")
         else:
             print(f"    Added to existing group for key")
@@ -2146,6 +2239,13 @@ def group_vulnerabilities(vulnerabilities):
         ref_link = vuln.get('reference_link', '')
         if ref_link and ref_link.strip():
             grouped[key]['reference_links'].append(ref_link)
+        # Add new dashboard fields
+        if vuln.get('reported_by'):
+            grouped[key]['reported_by_list'].append(vuln.get('reported_by'))
+        if vuln.get('project'):
+            grouped[key]['project_list'].append(vuln.get('project'))
+        if vuln.get('severity_level'):
+            grouped[key]['severity_level_list'].append(vuln.get('severity_level'))
     for g in grouped.values():
         g['ip'] = ', '.join(sorted(set(g['ips'])))
         g['associated_cves'] = sorted(set(g['associated_cves']))
@@ -2156,6 +2256,14 @@ def group_vulnerabilities(vulnerabilities):
             g['reference_link'] = g['reference_links'][0]
         else:
             g['reference_link'] = ''
+        # Process new dashboard fields - keep unique values
+        g['reported_by_list'] = list(set(g['reported_by_list']))
+        g['project_list'] = list(set(g['project_list']))
+        g['severity_level_list'] = list(set(g['severity_level_list']))
+        # Set main fields to first values (for backward compatibility)
+        g['reported_by'] = g['reported_by_list'][0] if g['reported_by_list'] else ''
+        g['project'] = g['project_list'][0] if g['project_list'] else ''
+        g['severity_level'] = g['severity_level_list'][0] if g['severity_level_list'] else ''
     print(f"After grouping - {len(grouped)} final vulnerabilities:")
     for g in grouped.values():
         print(f"SR: {g['sr_no']}, Name: {g['name']}, is_no_vuln_box: {g['is_no_vuln_box']}, IPs: {g['ip']}")
