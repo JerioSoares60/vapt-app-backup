@@ -903,21 +903,7 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
 def create_vulnerability_table_with_poc(doc, vulnerability, display_sr_no=None, image_map=None):
     # Create the main vulnerability table as before
     table = create_vulnerability_table(doc, vulnerability, display_sr_no, image_map)
-    # After the table, add PoC steps and images
-    para = doc.add_paragraph(f"Proof of Concept / Steps to Reproduce for {vulnerability['name']}:")
-    para.runs[0].bold = True
-    para.runs[0].font.size = Pt(14)
-    steps = vulnerability.get('steps_with_screenshots', [])
-    for step_idx, step in enumerate(steps, 1):
-        step_para = doc.add_paragraph(f"Step {step_idx}: {step['text']}")
-        step_para.paragraph_format.left_indent = Pt(10)
-        screenshot_path = find_image_for_step(step['screenshot'], image_map, display_sr_no, step_idx)
-        if screenshot_path and os.path.exists(screenshot_path):
-            print(f"[DEBUG] Adding image from ZIP: {screenshot_path}")
-            img_run = doc.add_paragraph().add_run()
-            img_run.add_picture(screenshot_path, width=Inches(4))
-        else:
-            doc.add_paragraph(f"[Screenshot missing: {step['screenshot']}]")
+    # Avoid printing PoC steps twice: they are already inside the table under the PoC row
     return table
 
 # Updated function signature to accept amendment_log and assessment details
@@ -1753,6 +1739,7 @@ def index_images_from_poc_zip(root_dir):
         return image_map
 
     # Expected structure: POC Screenshots/<IP>/<Severity>/<VUL-XXX>/*.png
+    # Normalize to handle Windows-extracted zips and spaces in folder names
     for ip_folder in os.listdir(screenshots_root):
         ip_path = os.path.join(screenshots_root, ip_folder)
         if not os.path.isdir(ip_path):
@@ -1766,7 +1753,8 @@ def index_images_from_poc_zip(root_dir):
                 if os.path.isdir(vuln_path) and vuln_id.lower().startswith("vul-"):
                     for fname in os.listdir(vuln_path):
                         if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
-                            match = re.search(r'step(\d+)', fname.lower())
+                            # Support names like 'step1.png', 'Step 1.PNG', 'STEP_1.jpg'
+                            match = re.search(r'step\s*_?(\d+)', fname.lower())
                             if match:
                                 step_num = int(match.group(1))
                                 key = f"{vuln_id.strip().lower()}_step{step_num}"
@@ -1949,8 +1937,9 @@ def insert_ip_summary_table_colored(doc, ip_summary_list):
 
 def parse_ip_summary_table(file_path):
     """
-    Parse the Excel file and extract the IP summary table (columns A–I) with short keys.
-    Returns a list of dicts, one per IP, with short keys.
+    Parse the Excel file and extract the IP summary table (columns A–I).
+    Returns a list of dicts per IP using the ORIGINAL column names that
+    insert_ip_summary_table_exact() expects, and filters blank rows.
     """
     df = pd.read_excel(file_path)
     df.columns = df.columns.str.strip()
@@ -1960,24 +1949,36 @@ def parse_ip_summary_table(file_path):
     # Some Excels may use "Information" instead of "Informational"
     if "Information" in df.columns:
         summary_cols = [c if c != "Informational" else "Information" for c in summary_cols]
-    summary_df = df[summary_cols].fillna("")
-    # Map to short keys
-    short_keys = ["host", "type", "status", "crit", "high", "med", "low", "info", "tot"]
+    # Keep only the columns we need, coerce NaNs to empty strings for filtering
+    summary_df = df[summary_cols].copy()
+    summary_df = summary_df.fillna("")
+    # Drop rows that are entirely empty (no hostname and all counts empty)
+    def row_is_effectively_empty(r):
+        if str(r.get(summary_cols[0], '')).strip() != '':
+            return False
+        # If hostname is empty and all severity totals are empty/zero → drop
+        for col in summary_cols[3:]:
+            val = str(r.get(col, '')).strip()
+            if val not in ('', '0', '0.0'):
+                return False
+        return True
+    mask_keep = ~summary_df.apply(row_is_effectively_empty, axis=1)
+    summary_df = summary_df[mask_keep]
+    # Build list of dicts with original keys
     summary_list = []
     for _, row in summary_df.iterrows():
         summary_list.append({
-            "host": row[summary_cols[0]],
-            "type": row[summary_cols[1]],
-            "status": row[summary_cols[2]],
-            "crit": row[summary_cols[3]],
-            "high": row[summary_cols[4]],
-            "med": row[summary_cols[5]],
-            "low": row[summary_cols[6]],
-            "info": row[summary_cols[7]],
-            "tot": row[summary_cols[8]],
+            "Hostname": row.get(summary_cols[0], ''),
+            "IP Type": row.get(summary_cols[1], ''),
+            "VAPT Status": row.get(summary_cols[2], ''),
+            "Critical": row.get(summary_cols[3], ''),
+            "High": row.get(summary_cols[4], ''),
+            "Medium": row.get(summary_cols[5], ''),
+            "Low": row.get(summary_cols[6], ''),
+            "Informational": row.get(summary_cols[7], row.get('Information', '')),
+            "Total": row.get(summary_cols[8], ''),
         })
-    # Debug print for all IPs in summary table
-    print(f"All IPs in summary table: {summary_df['Hostname'].tolist()}")
+    print(f"All IPs in summary table (filtered): {[r['Hostname'] for r in summary_list]}")
     return summary_list
 
 def insert_ip_summary_table_colored_at_start(doc, ip_summary_list):
