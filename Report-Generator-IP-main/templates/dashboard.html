@@ -434,14 +434,14 @@
         let rows = XLSX.utils.sheet_to_json(sheet, {defval:'', raw:true});
         rows = normalizeHeaders(rows);
         ALL_ROWS = rows;
-        // Validate essential columns
-        const required=['EmpID','ReportedBy','Project','Severity'];
+        // Validate essential columns (EmpID optional)
+        const required=['ReportedBy','Project','Severity'];
         const missing = required.filter(k=>!(k in rows[0]));
         if(missing.length){ throw new Error(`Missing columns: ${missing.join(', ')}`); }
         const total = rows.length;
         const severity = group(rows, 'Severity');
         const byEmployee = Object.entries(group(rows, 'ReportedBy')).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
-        const testers = new Set(rows.map(r=>r.EmpID || r.ReportedBy).filter(Boolean)).size;
+        const testers = new Set(rows.map(r=>r.ReportedBy || r.EmpID).filter(Boolean)).size;
         // Project pivot
         const projects = {};
         rows.forEach(r=>{ const p=r.Project||'Unknown'; projects[p]=projects[p]||{Critical:0,High:0,Medium:0,Low:0,Informational:0}; projects[p][r.Severity]=(projects[p][r.Severity]||0)+1; });
@@ -449,8 +449,8 @@
         // Employee table
         const empMap={};
         rows.forEach(r=>{
-          const key=(r.EmpID||'').toString().trim()+ '|' + (r.ReportedBy||'').toString().trim();
-          if(!empMap[key]) empMap[key]={empId:r.EmpID||'', name:r.ReportedBy||'', total:0, sev:{}};
+          const key=(r.ReportedBy||r.EmpID||'').toString().trim();
+          if(!empMap[key]) empMap[key]={empId:r.EmpID||'', name:r.ReportedBy||r.EmpID||'', total:0, sev:{}};
           empMap[key].total+=1; empMap[key].sev[r.Severity]=(empMap[key].sev[r.Severity]||0)+1;
         });
         const empRows = Object.values(empMap).sort((a,b)=>b.total-a.total);
