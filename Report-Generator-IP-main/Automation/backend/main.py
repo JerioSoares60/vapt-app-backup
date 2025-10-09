@@ -153,6 +153,23 @@ async def list_dashboard_datasets(request: Request, db: Session = Depends(get_db
         for r in rows
     ]
 
+@router.get("/dashboard/latest-dataset")
+async def latest_dashboard_dataset(request: Request, db: Session = Depends(get_db)):
+    if not is_dashboard_allowed(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    row = db.query(DashboardDataset).order_by(DashboardDataset.uploaded_at.desc()).first()
+    if not row:
+        return {"status": "empty"}
+    return {
+        "id": row.id,
+        "title": row.title,
+        "project_name": row.project_name,
+        "uploaded_by_email": row.uploaded_by_email,
+        "uploaded_by_name": row.uploaded_by_name,
+        "uploaded_at": row.uploaded_at.isoformat(),
+        "file_path": row.file_path
+    }
+
 @router.get("/dashboard-datasets/{dataset_id}/file")
 async def download_dashboard_dataset_file(dataset_id: int, request: Request, db: Session = Depends(get_db)):
     if not is_dashboard_allowed(request):

@@ -2111,6 +2111,17 @@ def insert_ip_summary_table_exact(doc, ip_summary_list):
         tcPr = tc.get_or_add_tcPr()
         no_wrap = parse_xml(r'<w:noWrap %s/>' % nsdecls('w'))
         tcPr.append(no_wrap)
+    def as_int_str(v):
+        try:
+            if v is None:
+                return '0'
+            if isinstance(v, str):
+                v = v.strip()
+                if v == '':
+                    return '0'
+            return str(int(float(v)))
+        except Exception:
+            return str(v)
     for idx, row in enumerate(ip_summary_list, 1):
         cells = table.add_row().cells
         values = [
@@ -2118,12 +2129,12 @@ def insert_ip_summary_table_exact(doc, ip_summary_list):
             str(row.get("host", row.get("Hostname", ""))),
             str(row.get("type", row.get("IP Type", ""))),
             str(row.get("status", row.get("VAPT Status", ""))),
-            str(row.get("crit", row.get("Critical", ""))),
-            str(row.get("high", row.get("High", ""))),
-            str(row.get("med", row.get("Medium", ""))),
-            str(row.get("low", row.get("Low", ""))),
-            str(row.get("info", row.get("Informational", row.get("Information", "")))),
-            str(row.get("tot", row.get("Total", "")))
+            as_int_str(row.get("crit", row.get("Critical", 0))),
+            as_int_str(row.get("high", row.get("High", 0))),
+            as_int_str(row.get("med", row.get("Medium", 0))),
+            as_int_str(row.get("low", row.get("Low", 0))),
+            as_int_str(row.get("info", row.get("Informational", row.get("Information", 0)))),
+            as_int_str(row.get("tot", row.get("Total", 0)))
         ]
         for i, value in enumerate(values):
             cells[i].text = value
