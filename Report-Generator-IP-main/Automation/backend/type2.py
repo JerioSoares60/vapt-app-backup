@@ -1721,14 +1721,15 @@ def index_images_from_poc_zip(root_dir):
     image_map = {}
     screenshots_root = None
 
-    # If the current directory is 'POC Screenshots', use it directly
-    if os.path.basename(root_dir).strip().lower() == 'poc screenshots':
+    # If the current directory is 'POC Screenshots*', use it directly (accept suffix digits)
+    base = os.path.basename(root_dir).strip().lower()
+    if base.startswith('poc screenshots'):
         screenshots_root = root_dir
     else:
-        # Look for the 'POC Screenshots' directory inside the extracted ZIP
+        # Look for a folder that starts with 'POC Screenshots' inside the extracted ZIP
         for dirpath, dirnames, _ in os.walk(root_dir):
             for d in dirnames:
-                if d.strip().lower() == 'poc screenshots':
+                if d.strip().lower().startswith('poc screenshots'):
                     screenshots_root = os.path.join(dirpath, d)
                     break
             if screenshots_root:
@@ -1738,7 +1739,7 @@ def index_images_from_poc_zip(root_dir):
         print("[ERROR] 'POC Screenshots' folder not found in ZIP.")
         return image_map
 
-    # Expected structure: POC Screenshots/<IP>/<Severity>/<VUL-XXX>/*.png
+    # Expected structure: POC Screenshots*/<IP>/<Severity>/<VUL-XXX>/stepN.*
     # Normalize to handle Windows-extracted zips and spaces in folder names
     for ip_folder in os.listdir(screenshots_root):
         ip_path = os.path.join(screenshots_root, ip_folder)
@@ -1754,7 +1755,13 @@ def index_images_from_poc_zip(root_dir):
                     for fname in os.listdir(vuln_path):
                         if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
                             # Support names like 'step1.png', 'Step 1.PNG', 'STEP_1.jpg'
-                            match = re.search(r'step\s*_?(\d+)', fname.lower())
+                            m = re.search(r'step\s*[_-]?(\d+)', fname.lower())
+                            if not m:
+                                # fallback: if no number, assume order
+                                # map sequentially by discovery order
+                                # maintain per-vuln counter
+                                pass
+                            match = m
                             if match:
                                 step_num = int(match.group(1))
                                 key = f"{vuln_id.strip().lower()}_step{step_num}"

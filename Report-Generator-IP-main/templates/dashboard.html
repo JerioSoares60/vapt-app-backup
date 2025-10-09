@@ -472,6 +472,22 @@
         showActions(true);
       }
       async function listPrevious(){
+        // Pull latest dataset automatically for monitoring
+        const latest = await fetch('/type1/dashboard/latest-dataset');
+        if(latest.ok){
+          const info = await latest.json();
+          if(info && info.status !== 'empty'){
+            // Load the CSV file and render stats
+            try{
+              const resp = await fetch('/type1/dashboard-datasets/' + info.id + '/file');
+              if(resp.ok){
+                const data = await resp.arrayBuffer();
+                const wb = XLSX.read(data, {type:'array'});
+                parseWorkbook(wb);
+              }
+            }catch(e){ console.error('Auto-load latest dataset failed', e); }
+          }
+        }
         const r = await fetch('/type1/dashboard-datasets');
         if(!r.ok){ $('#prevList').textContent='Failed to load datasets'; return; }
         const data = await r.json();
