@@ -1814,20 +1814,8 @@ def assign_display_sr_no(vulnerabilities):
     return vulnerabilities 
 
 def insert_poc_steps_section(doc, vulnerability, image_map):
-    # Always add a new section for PoC steps
-    doc.add_paragraph("Proof of Concept / Steps to Reproduce:").runs[0].bold = True
-    steps = vulnerability.get('steps_with_screenshots', [])
-    sr_no = vulnerability.get('display_sr_no') or vulnerability.get('sr_no')
-    for idx, step in enumerate(steps, 1):
-        step_para = doc.add_paragraph(f"Step {idx}: {step['text']}")
-        step_para.paragraph_format.left_indent = Pt(10)
-        screenshot_path = find_image_for_step(step['screenshot'], image_map, sr_no, idx)
-        if screenshot_path and os.path.exists(screenshot_path):
-            print(f"[DEBUG] Adding image from ZIP: {screenshot_path}")
-            img_run = doc.add_paragraph().add_run()
-            img_run.add_picture(screenshot_path, width=Inches(5))
-        else:
-            doc.add_paragraph(f"[Screenshot missing: {step['screenshot']}]") 
+    # Deprecated: PoC steps are rendered inside the vulnerability table.
+    return
 
 def find_placeholder_paragraph(doc, placeholder_text):
     # Search in paragraphs
