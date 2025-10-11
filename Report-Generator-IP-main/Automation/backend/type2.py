@@ -971,8 +971,8 @@ def generate_word_report(
             tmp_path = tmp.name
         # Open with python-docx for dynamic PoC steps/images
         doc = Document(tmp_path)
-        # Insert the exact IP summary table at the start
-        ip_summary_list = parse_ip_summary_table(vulnerability_file_location)
+        # Generate IP summary table from actual vulnerability data
+        ip_summary_list = generate_ip_summary_from_vulnerabilities(vulnerabilities)
         insert_ip_summary_table_exact(doc, ip_summary_list)
         
         # Remove extra blank paragraphs or page breaks after the IP summary table
@@ -983,10 +983,24 @@ def generate_word_report(
         if not (doc.paragraphs and doc.paragraphs[-1].text.strip() == ''):
             doc.add_page_break()
 
-        # Ensure vulnerabilities are ordered by their original row order if present
+        # Sort vulnerabilities by severity order: Critical, High, Medium, Low, Informational, No Vulnerability
+        def get_severity_order(vuln):
+            severity = vuln.get('severity', '').strip()
+            # Map severities to order numbers
+            severity_map = {
+                'Critical': 0,
+                'High': 1, 
+                'Medium': 2,
+                'Low': 3,
+                'Informational': 4,
+                'No Vulnerability': 5
+            }
+            return severity_map.get(severity, 6)  # Unknown gets highest number
+        
         try:
-            vulnerabilities.sort(key=lambda v: v.get('row_order', 0))
-        except Exception:
+            vulnerabilities.sort(key=get_severity_order)
+        except Exception as e:
+            print(f"Error sorting vulnerabilities: {e}")
             pass
 
         # Define chart variables before try block
@@ -2040,6 +2054,65 @@ def insert_ip_summary_table_colored(doc, ip_summary_list):
 
     
 
+def generate_ip_summary_from_vulnerabilities(vulnerabilities):
+    """
+    Generate IP summary table from actual vulnerability data instead of Excel columns.
+    This ensures accurate totals calculation.
+    """
+    ip_data = {}
+    
+    for vuln in vulnerabilities:
+        ip = vuln.get('ip', '').strip()
+        if not ip:
+            continue
+            
+        # Split multiple IPs if comma-separated
+        ips = [ip.strip() for ip in ip.split(',')]
+        
+        for single_ip in ips:
+            if single_ip not in ip_data:
+                ip_data[single_ip] = {
+                    'Hostname': single_ip,
+                    'IP Type': 'External',  # Default, can be updated from Excel if needed
+                    'VAPT Status': 'Completed',
+                    'Critical': 0,
+                    'High': 0,
+                    'Medium': 0,
+                    'Low': 0,
+                    'Informational': 0,
+                    'Total': 0
+                }
+            
+            # Count by severity
+            severity = vuln.get('severity', '').strip()
+            if severity == 'Critical':
+                ip_data[single_ip]['Critical'] += 1
+            elif severity == 'High':
+                ip_data[single_ip]['High'] += 1
+            elif severity == 'Medium':
+                ip_data[single_ip]['Medium'] += 1
+            elif severity == 'Low':
+                ip_data[single_ip]['Low'] += 1
+            elif severity == 'Informational':
+                ip_data[single_ip]['Informational'] += 1
+            elif severity == 'No Vulnerability':
+                ip_data[single_ip]['Informational'] += 1  # Treat as informational
+    
+    # Calculate totals for each IP
+    for ip in ip_data:
+        ip_data[ip]['Total'] = (
+            ip_data[ip]['Critical'] + 
+            ip_data[ip]['High'] + 
+            ip_data[ip]['Medium'] + 
+            ip_data[ip]['Low'] + 
+            ip_data[ip]['Informational']
+        )
+    
+    summary_list = list(ip_data.values())
+    print(f"Generated IP summary from vulnerabilities: {len(summary_list)} IPs")
+    print(f"Sample IP data: {summary_list[0] if summary_list else 'No data'}")
+    return summary_list
+
 def parse_ip_summary_table(file_path):
     """
     Parse the Excel file and extract the IP summary table (columns A–I).
@@ -2072,18 +2145,27 @@ def parse_ip_summary_table(file_path):
     # Build list of dicts with original keys
     summary_list = []
     for _, row in summary_df.iterrows():
+        # Calculate total from individual severity counts
+        critical = int(float(str(row.get(summary_cols[3], 0)).strip() or 0))
+        high = int(float(str(row.get(summary_cols[4], 0)).strip() or 0))
+        medium = int(float(str(row.get(summary_cols[5], 0)).strip() or 0))
+        low = int(float(str(row.get(summary_cols[6], 0)).strip() or 0))
+        informational = int(float(str(row.get(summary_cols[7], row.get('Information', 0))).strip() or 0))
+        calculated_total = critical + high + medium + low + informational
+        
         summary_list.append({
             "Hostname": row.get(summary_cols[0], ''),
             "IP Type": row.get(summary_cols[1], ''),
             "VAPT Status": row.get(summary_cols[2], ''),
-            "Critical": row.get(summary_cols[3], ''),
-            "High": row.get(summary_cols[4], ''),
-            "Medium": row.get(summary_cols[5], ''),
-            "Low": row.get(summary_cols[6], ''),
-            "Informational": row.get(summary_cols[7], row.get('Information', '')),
-            "Total": row.get(summary_cols[8], ''),
+            "Critical": critical,
+            "High": high,
+            "Medium": medium,
+            "Low": low,
+            "Informational": informational,
+            "Total": calculated_total,
         })
     print(f"All IPs in summary table (filtered): {[r['Hostname'] for r in summary_list]}")
+    print(f"Sample IP data: {summary_list[0] if summary_list else 'No data'}")
     return summary_list
 
 def insert_ip_summary_table_colored_at_start(doc, ip_summary_list):
@@ -2160,19 +2242,30 @@ def insert_ip_summary_table_colored_at_start(doc, ip_summary_list):
 def compute_ip_summary_totals(ip_list):
     totals = {"crit": 0, "high": 0, "med": 0, "low": 0, "info": 0, "tot": 0}
     for row in ip_list:
-        for key in totals:
-            try:
-                # Accept strings like '3.0' and coerce to int to drop decimals
-                value = row.get(key, 0)
-                if isinstance(value, str):
-                    value = value.strip()
-                    if value == '':
-                        value = 0
-                    else:
-                        value = float(value)
-                totals[key] += int(float(value))
-            except Exception:
-                totals[key] += 0
+        try:
+            # Get individual severity counts
+            critical = int(float(str(row.get('Critical', 0)).strip() or 0))
+            high = int(float(str(row.get('High', 0)).strip() or 0))
+            medium = int(float(str(row.get('Medium', 0)).strip() or 0))
+            low = int(float(str(row.get('Low', 0)).strip() or 0))
+            informational = int(float(str(row.get('Informational', 0)).strip() or 0))
+            
+            # Add to totals
+            totals["crit"] += critical
+            totals["high"] += high
+            totals["med"] += medium
+            totals["low"] += low
+            totals["info"] += informational
+            
+            # Calculate total for this row
+            row_total = critical + high + medium + low + informational
+            totals["tot"] += row_total
+            
+        except Exception as e:
+            print(f"Error calculating totals for row {row}: {e}")
+            continue
+    
+    print(f"Calculated totals: {totals}")
     return totals
 
 def insert_ip_summary_table_exact(doc, ip_summary_list):
