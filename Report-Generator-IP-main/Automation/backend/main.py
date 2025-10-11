@@ -2167,4 +2167,66 @@ def create_ip_severity_bar_chart(ip, vulnerabilities, output_path):
     plt.tight_layout()
     plt.savefig(output_path, bbox_inches='tight')
     plt.close()
-    return output_path
+
+# Audit Logs Endpoint
+@router.get("/audit-logs")
+async def get_audit_logs(request: Request, db: Session = Depends(get_db)):
+    """Get audit logs for the dashboard"""
+    if not is_dashboard_allowed(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    try:
+        # Get audit logs from database
+        logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(100).all()
+        
+        return [
+            {
+                "id": log.id,
+                "user_email": log.user_email,
+                "user_name": log.user_name,
+                "action": log.action,
+                "metadata_json": log.metadata_json,
+                "created_at": log.created_at.isoformat()
+            }
+            for log in logs
+        ]
+    except Exception as e:
+        print(f"Error fetching audit logs: {e}")
+        return []
+
+# Usage Analytics Endpoint
+@router.get("/usage-analytics")
+async def get_usage_analytics(request: Request, db: Session = Depends(get_db)):
+    """Get usage analytics for the dashboard"""
+    if not is_dashboard_allowed(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    try:
+        from sqlalchemy import text
+        
+        # Get usage statistics
+        result = db.execute(text("""
+            SELECT 
+                user_email,
+                action_type,
+                COUNT(*) as action_count,
+                MAX(created_at) as last_activity
+            FROM usage_analytics
+            WHERE created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY user_email, action_type
+            ORDER BY action_count DESC
+        """))
+        
+        analytics = []
+        for row in result.fetchall():
+            analytics.append({
+                "user_email": row.user_email,
+                "action_type": row.action_type,
+                "action_count": row.action_count,
+                "last_activity": row.last_activity.isoformat() if row.last_activity else None
+            })
+        
+        return analytics
+    except Exception as e:
+        print(f"Error fetching usage analytics: {e}")
+        return []

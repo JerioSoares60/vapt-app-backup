@@ -1829,56 +1829,91 @@ def index_images_from_poc_zip(root_dir):
     image_map = {}
     screenshots_root = None
 
+    print(f"[DEBUG] Starting image indexing from: {root_dir}")
+
     # If the current directory is 'POC Screenshots*', use it directly (accept suffix digits)
     base = os.path.basename(root_dir).strip().lower()
     if base.startswith('poc screenshots'):
         screenshots_root = root_dir
+        print(f"[DEBUG] Using current directory as screenshots root: {screenshots_root}")
     else:
         # Look for a folder that starts with 'POC Screenshots' inside the extracted ZIP
+        print(f"[DEBUG] Searching for POC Screenshots folder in: {root_dir}")
         for dirpath, dirnames, _ in os.walk(root_dir):
+            print(f"[DEBUG] Checking directory: {dirpath}, subdirs: {dirnames}")
             for d in dirnames:
                 if d.strip().lower().startswith('poc screenshots'):
                     screenshots_root = os.path.join(dirpath, d)
+                    print(f"[DEBUG] Found screenshots root: {screenshots_root}")
                     break
             if screenshots_root:
                 break
 
     if not screenshots_root:
         print("[ERROR] 'POC Screenshots' folder not found in ZIP.")
+        print(f"[DEBUG] Available directories in {root_dir}:")
+        try:
+            for item in os.listdir(root_dir):
+                print(f"  - {item}")
+        except:
+            print("  - Cannot list directory")
         return image_map
+
+    print(f"[DEBUG] Processing screenshots from: {screenshots_root}")
 
     # Expected structure: POC Screenshots*/<IP>/<Severity>/<VUL-XXX>/stepN.*
     # Normalize to handle Windows-extracted zips and spaces in folder names
-    for ip_folder in os.listdir(screenshots_root):
-        ip_path = os.path.join(screenshots_root, ip_folder)
-        if not os.path.isdir(ip_path):
-            continue
-        for severity in os.listdir(ip_path):
-            severity_path = os.path.join(ip_path, severity)
-            if not os.path.isdir(severity_path):
+    try:
+        for ip_folder in os.listdir(screenshots_root):
+            ip_path = os.path.join(screenshots_root, ip_folder)
+            if not os.path.isdir(ip_path):
                 continue
-            for vuln_id in os.listdir(severity_path):
-                vuln_path = os.path.join(severity_path, vuln_id)
-                if os.path.isdir(vuln_path) and vuln_id.lower().startswith("vul-"):
-                    for fname in os.listdir(vuln_path):
-                        if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
-                            # Support names like 'step1.png', 'Step 1.PNG', 'STEP_1.jpg'
-                            m = re.search(r'step\s*[_-]?(\d+)', fname.lower())
-                            if not m:
-                                # fallback: if no number, assume order
-                                # map sequentially by discovery order
-                                # maintain per-vuln counter
-                                pass
-                            match = m
-                            if match:
-                                step_num = int(match.group(1))
-                                key = f"{vuln_id.strip().lower()}_step{step_num}"
+            print(f"[DEBUG] Processing IP folder: {ip_folder}")
+            
+            for severity in os.listdir(ip_path):
+                severity_path = os.path.join(ip_path, severity)
+                if not os.path.isdir(severity_path):
+                    continue
+                print(f"[DEBUG] Processing severity: {severity}")
+                
+                for vuln_id in os.listdir(severity_path):
+                    vuln_path = os.path.join(severity_path, vuln_id)
+                    if os.path.isdir(vuln_path) and vuln_id.lower().startswith("vul-"):
+                        print(f"[DEBUG] Processing vulnerability: {vuln_id}")
+                        
+                        for fname in os.listdir(vuln_path):
+                            if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
+                                print(f"[DEBUG] Found image: {fname}")
+                                
+                                # Support names like 'step1.png', 'Step 1.PNG', 'STEP_1.jpg'
+                                m = re.search(r'step\s*[_-]?(\d+)', fname.lower())
+                                if m:
+                                    step_num = int(m.group(1))
+                                else:
+                                    # Fallback: use file order
+                                    step_num = len([f for f in os.listdir(vuln_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+                                
+                                # Create multiple possible keys for better matching
+                                keys = [
+                                    f"{vuln_id.strip().lower()}_step{step_num}",
+                                    f"{vuln_id.strip().lower()}step{step_num}",
+                                    f"step{step_num}",
+                                    fname.lower().replace('.png', '').replace('.jpg', '').replace('.jpeg', ''),
+                                    f"{vuln_id.strip().lower()}_{fname.lower().replace('.png', '').replace('.jpg', '').replace('.jpeg', '')}"
+                                ]
+                                
                                 full_path = os.path.join(vuln_path, fname)
-                                image_map[key] = full_path
-                                print(f"[MAP] {key} → {full_path}")
+                                
+                                # Add all possible keys
+                                for key in keys:
+                                    image_map[key] = full_path
+                                    print(f"[MAP] {key} → {full_path}")
+    except Exception as e:
+        print(f"[ERROR] Error processing images: {e}")
+    
     print('--- Final Image Map Keys ---')
     for k in image_map:
-        print(k)
+        print(f"  {k}")
     print('--- End Image Map Keys ---')
     return image_map
 
