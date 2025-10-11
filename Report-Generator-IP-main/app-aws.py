@@ -4,6 +4,7 @@ from fastapi.responses import RedirectResponse
 from Automation.backend.main import app as type1_app
 from Automation.backend.type2 import app as type2_app
 from auth import router as auth_router
+from session_security import SessionSecurityMiddleware
 import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -28,18 +29,16 @@ app = FastAPI(
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "supersecret"),
-    https_only=True,  # Set to True for production with HTTPS
+    https_only=False,  # Set to False for testing, True for production with HTTPS
     same_site="lax",
     session_cookie="reportgen_session"
 )
 
-# Include SSO authentication router
+# Add session security middleware
 app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET_KEY", "supersecret"),
-    https_only=True,  # Set to True for production with HTTPS
-    same_site="lax",
-    session_cookie="reportgen_session"
+    SessionSecurityMiddleware,
+    session_timeout=3600,  # 1 hour
+    csrf_timeout=1800      # 30 minutes
 )
 
 # Include SSO authentication router
@@ -89,7 +88,7 @@ async def dashboard(request: Request):
     user = request.session.get("user")
     if not user:
         return RedirectResponse("/login")
-    allowed = {"sarvesh.salgaonkar@cybersmithsecure.com", "developer@cybersmithsecure.com"}
+    allowed = {"sarvesh.salgaonkar@cybersmithsecure.com", "smith.gonsalves@cybersmithsecure.com", "developer@cybersmithsecure.com"}
     if user.get("email", "").lower() not in allowed:
         return RedirectResponse("/report_formats.html")
     from fastapi.templating import Jinja2Templates

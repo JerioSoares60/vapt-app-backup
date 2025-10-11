@@ -85,8 +85,20 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             return response
         
+        # Check if session middleware is available
+        if "session" not in request.scope:
+            # If no session middleware, just proceed without security checks
+            response = await call_next(request)
+            return response
+        
         # Get current session
-        session_data = request.session
+        try:
+            session_data = request.session
+        except Exception as e:
+            # If session access fails, proceed without security checks
+            print(f"Session access failed: {e}")
+            response = await call_next(request)
+            return response
         
         # Generate current fingerprint
         current_fingerprint = self._generate_session_fingerprint(request)
