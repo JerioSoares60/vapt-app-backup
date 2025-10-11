@@ -770,12 +770,22 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
             run.font.bold = False
         else:  # This is the Steps row - handle steps with screenshots
             steps = vulnerability.get('steps_with_screenshots', [])
-            if not steps:
+            
+            # Remove duplicate steps based on text content
+            unique_steps = []
+            seen_texts = set()
+            for step in steps:
+                step_text = step.get('text', '').strip()
+                if step_text and step_text not in seen_texts:
+                    unique_steps.append(step)
+                    seen_texts.add(step_text)
+            
+            if not unique_steps:
                 run = paragraph.add_run("No steps provided.")
                 run.font.name = 'Altone Trial'
                 run.font.size = Pt(11)
             else:
-                for step_idx, step in enumerate(steps):
+                for step_idx, step in enumerate(unique_steps):
                     step_para = cell.add_paragraph()
                     step_para.paragraph_format.left_indent = Pt(10)
                     step_text = step['text']
@@ -1605,6 +1615,20 @@ def create_severity_bar_chart(severity_counts, output_path):
         if not key or str(key).strip() == '':
             key = 'No Vulnerability'
         cleaned_counts[key] = cleaned_counts.get(key, 0) + v
+    
+    # Ensure we have data to plot
+    if not cleaned_counts or sum(cleaned_counts.values()) == 0:
+        # Create a placeholder chart
+        plt.figure(figsize=(10, 7))
+        plt.text(0.5, 0.5, 'No vulnerability data available', 
+                ha='center', va='center', fontsize=16, transform=plt.gca().transAxes)
+        plt.title('Total Vulnerabilities Found', fontsize=16)
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+        return output_path
+    
     severities = list(cleaned_counts.keys())
     counts = list(cleaned_counts.values())
     colors = [
@@ -1620,19 +1644,51 @@ def create_severity_bar_chart(severity_counts, output_path):
         zip(severities, counts, colors),
         key=lambda x: severity_order.get(x[0], 5)
     ))
+    
+    # Create 3D-like bar chart with enhanced styling
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111)
+    
     x_pos = np.arange(len(sorted_severities))
-    plt.figure(figsize=(10, 7))
-    bars = plt.bar(x_pos, sorted_counts, color=sorted_colors, width=0.6)
-    plt.xticks(x_pos, sorted_severities, rotation=10, ha='center', fontsize=12)
-    plt.ylabel('Number of Vulnerabilities', fontsize=14)
-    plt.title('Total Vulnerabilities Found', fontsize=16)
-    # Place count labels inside the bars, centered, bold, and white
+    
+    # Create bars with 3D effect using gradient colors and shadows
+    bars = ax.bar(x_pos, sorted_counts, color=sorted_colors, width=0.7, 
+                  edgecolor='black', linewidth=1.5, alpha=0.8)
+    
+    # Add shadow effect for 3D appearance
+    for i, bar in enumerate(bars):
+        # Create shadow
+        shadow = ax.bar(x_pos[i] + 0.02, sorted_counts[i], color='black', 
+                       width=0.7, alpha=0.3, zorder=0)
+        # Bring main bar to front
+        bar.set_zorder(2)
+    
+    # Enhanced styling
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(sorted_severities, rotation=15, ha='center', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Number of Vulnerabilities', fontsize=14, fontweight='bold')
+    ax.set_title('Total Vulnerabilities Found', fontsize=18, fontweight='bold', pad=20)
+    
+    # Add grid for better readability
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+    
+    # Place count labels inside the bars with enhanced styling
     for i, bar in enumerate(bars):
         height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2, height/2, str(int(height)),
-                 ha='center', va='center', fontsize=14, fontweight='bold', color='white')
+        if height > 0:
+            ax.text(bar.get_x() + bar.get_width()/2, height/2, str(int(height)),
+                   ha='center', va='center', fontsize=14, fontweight='bold', 
+                   color='white', bbox=dict(boxstyle="round,pad=0.3", facecolor='black', alpha=0.7))
+    
+    # Add total count at the top
+    total_count = sum(sorted_counts)
+    ax.text(0.5, 0.95, f'Total: {total_count}', transform=ax.transAxes, 
+            ha='center', va='top', fontsize=16, fontweight='bold',
+            bbox=dict(boxstyle="round,pad=0.5", facecolor='lightblue', alpha=0.8))
+    
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
     return output_path
 
@@ -1640,80 +1696,91 @@ def create_severity_donut_chart(severity_counts, output_path):
     # Map empty or unknown severities to 'Unknown'
     cleaned_counts = {}
     for k, v in severity_counts.items():
-        key = k if k in severity_order else 'Unknown'
+        key = k if k in severity_order else 'No Vulnerability'
         if not key or str(key).strip() == '':
-            key = 'Unknown'
+            key = 'No Vulnerability'
         cleaned_counts[key] = cleaned_counts.get(key, 0) + v
+
+    # Ensure we have data to plot
+    if not cleaned_counts or sum(cleaned_counts.values()) == 0:
+        # Create a placeholder chart
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.text(0.5, 0.5, 'No vulnerability data available', 
+                ha='center', va='center', fontsize=16, transform=ax.transAxes)
+        ax.set_title('Overall Vulnerabilities Identified', fontsize=18, fontweight='bold')
+        ax.axis('off')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        return output_path
 
     severities = list(cleaned_counts.keys())
     counts = list(cleaned_counts.values())
     total_findings = sum(counts)
 
-    # Use colors from get_severity_colors for consistency
-    color_map = {severity: get_severity_colors(severity)['row1_bg'] for severity in severity_order.keys()}
-    color_map['Unknown'] = '#808080'  # Grey for unknown
+    # Enhanced color palette with gradients
+    color_map = {
+        'Critical': '#8B0000',
+        'High': '#DC143C', 
+        'Medium': '#FFD700',
+        'Low': '#32CD32',
+        'Informational': '#4169E1',
+        'No Vulnerability': '#808080'
+    }
 
     # Sort data by severity order
     sorted_severities, sorted_counts = zip(*sorted(cleaned_counts.items(), key=lambda item: severity_order.get(item[0], 5)))
     sorted_colors = [color_map.get(s, '#808080') for s in sorted_severities]
 
-    # Create the donut chart
-    fig, ax = plt.subplots(figsize=(8, 6))  # Adjusted figure size for better proportions
-
-    # Create the pie chart slices with a thinner donut (width=0.4 instead of 0.3)
+    # Create the enhanced donut chart
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Create gradient effect by using multiple pie slices with different shades
     wedges, texts, autotexts = ax.pie(
         sorted_counts,
         colors=sorted_colors, 
-        wedgeprops=dict(width=0.4, edgecolor='white'),  # Thinner donut with white edges for separation
-        startangle=90,  # Start at the top
-        autopct=lambda pct: f'{pct:.0f}%',  # Percentage format using a lambda function
-        pctdistance=0.75,  # Move percentage labels closer to the center
-        textprops={'fontsize': 10, 'weight': 'bold', 'color': 'white'}  # Style percentage labels
+        wedgeprops=dict(width=0.5, edgecolor='white', linewidth=2),
+        startangle=90,
+        autopct='',  # Remove percentage labels for cleaner look
+        pctdistance=0.8,
+        explode=[0.05 if count > 0 else 0 for count in sorted_counts]  # Slight separation for active slices
     )
 
-    # Draw a circle in the center to make it a donut
-    centre_circle = plt.Circle((0, 0), 0.60, fc='white')  # Adjusted center circle size
+    # Add shadow effect for 3D appearance
+    for wedge in wedges:
+        wedge.set_alpha(0.8)
+    
+    # Draw center circle with gradient effect
+    centre_circle = plt.Circle((0, 0), 0.55, fc='white', edgecolor='gray', linewidth=2)
     fig.gca().add_artist(centre_circle)
 
-    # Add total findings text in the center
-    ax.text(
-        0, 0,
-        f'Total\nFindings\n{total_findings}',
-        ha='center',
-        va='center',
-        fontsize=12,
-        weight='bold',
-        color='black'
-    )
+    # Add inner shadow circle
+    shadow_circle = plt.Circle((0, 0), 0.53, fc='lightgray', alpha=0.3)
+    fig.gca().add_artist(shadow_circle)
 
-    # Add legend with counts, positioned below the chart to avoid overlap
-    legend_labels = [f'{s} ({c})' for s, c in zip(sorted_severities, sorted_counts)]
-    ax.legend( # type: ignore
-        wedges,
-        legend_labels,
-        title="Severity Levels",
-        loc="center",
-        bbox_to_anchor=(0.5, -0.1),  # Place legend below the chart
-        ncol=len(sorted_severities),  # Display in one row
-        fontsize=10,
-        title_fontsize=12,
-        frameon=False  # Remove the legend frame for a cleaner look
-    )
+    # Enhanced center text with better styling
+    ax.text(0, 0.1, 'Total', ha='center', va='center', 
+            fontsize=14, weight='bold', color='gray')
+    ax.text(0, -0.1, f'Findings\n{total_findings}', ha='center', va='center',
+            fontsize=18, weight='bold', color='black')
+
+    # Enhanced legend with better styling
+    legend_labels = [f'{s} ({c})' for s, c in zip(sorted_severities, sorted_counts) if c > 0]
+    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=color_map.get(s, '#808080'), 
+                                   edgecolor='white', linewidth=1) 
+                      for s, c in zip(sorted_severities, sorted_counts) if c > 0]
+    
+    ax.legend(legend_elements, legend_labels, title="Severity Levels",
+              loc="center", bbox_to_anchor=(0.5, -0.15), 
+              ncol=min(len(legend_labels), 3), fontsize=11, title_fontsize=13,
+              frameon=True, fancybox=True, shadow=True)
 
     # Set the title with consistent styling
-    plt.title(
-        'Overall Vulnerabilities Identified',
-        fontsize=14,
-        weight='bold',
-        pad=20,
-        color='#660099'  # Match the heading color used in the Word document
-    )
-
-    ax.axis('equal')  # Equal aspect ratio to ensure that pie is drawn as a circle
+    plt.title("Overall Vulnerabilities Identified", fontsize=18, fontweight='bold', pad=20)
+    
     plt.tight_layout()
-    plt.savefig(output_path, bbox_inches='tight')  # Ensure the chart legend is not cut off
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
-
     return output_path
 
 def index_images_from_poc_zip(root_dir):
@@ -1777,21 +1844,56 @@ def index_images_from_poc_zip(root_dir):
 def build_steps_with_images(steps_with_screenshots, image_map, tpl, sr_no):
     steps = []
     sr_no_key = sr_no.strip().lower() if sr_no else ''
-    for idx, step in enumerate(steps_with_screenshots, 1):
+    
+    # Remove duplicate steps based on text content
+    unique_steps = []
+    seen_texts = set()
+    for step in steps_with_screenshots:
+        step_text = step.get('text', '').strip()
+        if step_text and step_text not in seen_texts:
+            unique_steps.append(step)
+            seen_texts.add(step_text)
+    
+    for idx, step in enumerate(unique_steps, 1):
         screenshot_name = step.get('screenshot', '')
-        match = re.search(r'step(\\d+)', screenshot_name.strip().lower())
+        match = re.search(r'step(\d+)', screenshot_name.strip().lower())
         if match:
             step_num = int(match.group(1))
         else:
             step_num = idx
-        key = f"{sr_no_key}_step{step_num}"
-        img_path = image_map.get(key) if image_map else None
-        print(f"[POC IMAGE DEBUG] Step {idx}, Key: {key}, Path: {img_path}")
+        # Try multiple possible keys for the image
+        possible_keys = [
+            f"{sr_no_key}_step{step_num}",
+            f"{sr_no_key}step{step_num}",
+            f"step{step_num}",
+            screenshot_name.lower().replace('.png', '').replace('.jpg', '').replace('.jpeg', ''),
+            f"{sr_no_key}_{screenshot_name.lower().replace('.png', '').replace('.jpg', '').replace('.jpeg', '')}",
+            screenshot_name.lower() if screenshot_name else f"step{step_num}.png",
+            f"step{step_num}.png",
+            f"step{step_num}.jpg",
+            f"step{idx}.png",
+            f"step{idx}.jpg"
+        ]
+        
+        img_path = None
+        for key in possible_keys:
+            if key in image_map:
+                img_path = image_map[key]
+                break
+        
+        # If still no match, try to find any image for this vulnerability
+        if not img_path and image_map:
+            for map_key, map_path in image_map.items():
+                if sr_no_key in map_key.lower() and ('step' in map_key.lower() or '.png' in map_key.lower() or '.jpg' in map_key.lower()):
+                    img_path = map_path
+                    break
+        
+        print(f"[POC IMAGE DEBUG] Step {idx}, Screenshot: {screenshot_name}, Keys tried: {possible_keys}, Found: {img_path}")
         if img_path and os.path.exists(img_path):
             print(f"[POC IMAGE FOUND] Using image: {img_path}")
             image = InlineImage(tpl, img_path, width=Inches(5))
         else:
-            print(f"[POC IMAGE MISSING] {img_path}")
+            print(f"[POC IMAGE MISSING] No image found for step {idx}")
             image = f"[Screenshot missing: {screenshot_name}]"
         steps.append({'text': step['text'], 'image': image})
     return steps
@@ -2256,7 +2358,12 @@ def group_vulnerabilities(vulnerabilities):
         # Add all unique IPs
         if vuln.get('ip'):
             grouped[key]['ips'].extend([ip.strip() for ip in str(vuln.get('ip')).split(',') if ip.strip()])
-        grouped[key]['steps_with_screenshots'].extend(vuln.get('steps_with_screenshots', []))
+        # Only add steps if they don't already exist to prevent duplicates
+        existing_steps = grouped[key]['steps_with_screenshots']
+        new_steps = vuln.get('steps_with_screenshots', [])
+        for step in new_steps:
+            if step not in existing_steps:
+                existing_steps.append(step)
         grouped[key]['associated_cves'].extend(vuln.get('associated_cves', []))
         # Add reference link if it exists and is not empty
         ref_link = vuln.get('reference_link', '')
@@ -2347,7 +2454,17 @@ def create_no_vuln_box(doc, vulnerability, display_sr_no=None, image_map=None):
     run.font.color.rgb = RGBColor(124, 79, 163)
     run.font.name = 'Altone Trial'
     steps = vulnerability.get('steps_with_screenshots', [])
-    for step_idx, step in enumerate(steps):
+    
+    # Remove duplicate steps based on text content
+    unique_steps = []
+    seen_texts = set()
+    for step in steps:
+        step_text = step.get('text', '').strip()
+        if step_text and step_text not in seen_texts:
+            unique_steps.append(step)
+            seen_texts.add(step_text)
+    
+    for step_idx, step in enumerate(unique_steps):
         step_para = cell.add_paragraph()
         step_para.paragraph_format.left_indent = Pt(10)
         run = step_para.add_run(f"Step {step_idx+1}: {step['text']}")
