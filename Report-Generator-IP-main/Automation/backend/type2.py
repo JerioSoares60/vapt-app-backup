@@ -1899,7 +1899,16 @@ def index_images_from_poc_zip(root_dir):
                                     f"{vuln_id.strip().lower()}step{step_num}",
                                     f"step{step_num}",
                                     fname.lower().replace('.png', '').replace('.jpg', '').replace('.jpeg', ''),
-                                    f"{vuln_id.strip().lower()}_{fname.lower().replace('.png', '').replace('.jpg', '').replace('.jpeg', '')}"
+                                    f"{vuln_id.strip().lower()}_{fname.lower().replace('.png', '').replace('.jpg', '').replace('.jpeg', '')}",
+                                    # Add IP-based keys for specific IPs mentioned
+                                    f"{ip_folder.lower()}_{vuln_id.strip().lower()}_step{step_num}",
+                                    f"{ip_folder.lower()}_{severity.lower()}_{vuln_id.strip().lower()}_step{step_num}",
+                                    # Add just the filename as key
+                                    fname.lower(),
+                                    # Add step number variations
+                                    f"step{step_num}.png",
+                                    f"step{step_num}.jpg",
+                                    f"step{step_num}.jpeg"
                                 ]
                                 
                                 full_path = os.path.join(vuln_path, fname)
@@ -1908,6 +1917,10 @@ def index_images_from_poc_zip(root_dir):
                                 for key in keys:
                                     image_map[key] = full_path
                                     print(f"[MAP] {key} → {full_path}")
+                                
+                                # Also add a debug entry showing the full path structure
+                                debug_key = f"DEBUG_{ip_folder}_{severity}_{vuln_id}_{fname}"
+                                image_map[debug_key] = full_path
     except Exception as e:
         print(f"[ERROR] Error processing images: {e}")
     
@@ -1921,6 +1934,9 @@ def build_steps_with_images(steps_with_screenshots, image_map, tpl, sr_no):
     steps = []
     sr_no_key = sr_no.strip().lower() if sr_no else ''
     
+    print(f"[POC DEBUG] Building steps for SR: {sr_no}, Key: {sr_no_key}")
+    print(f"[POC DEBUG] Available image map keys: {list(image_map.keys())}")
+    
     # Remove duplicate steps based on text content
     unique_steps = []
     seen_texts = set()
@@ -1932,11 +1948,14 @@ def build_steps_with_images(steps_with_screenshots, image_map, tpl, sr_no):
     
     for idx, step in enumerate(unique_steps, 1):
         screenshot_name = step.get('screenshot', '')
+        print(f"[POC DEBUG] Processing step {idx}: {screenshot_name}")
+        
         match = re.search(r'step(\d+)', screenshot_name.strip().lower())
         if match:
             step_num = int(match.group(1))
         else:
             step_num = idx
+        
         # Try multiple possible keys for the image
         possible_keys = [
             f"{sr_no_key}_step{step_num}",
@@ -1955,14 +1974,44 @@ def build_steps_with_images(steps_with_screenshots, image_map, tpl, sr_no):
         for key in possible_keys:
             if key in image_map:
                 img_path = image_map[key]
+                print(f"[POC DEBUG] Found image with key: {key}")
                 break
         
         # If still no match, try to find any image for this vulnerability
         if not img_path and image_map:
+            print(f"[POC DEBUG] No direct match, searching for partial matches...")
             for map_key, map_path in image_map.items():
+                print(f"[POC DEBUG] Checking map key: {map_key}")
                 if sr_no_key in map_key.lower() and ('step' in map_key.lower() or '.png' in map_key.lower() or '.jpg' in map_key.lower()):
                     img_path = map_path
+                    print(f"[POC DEBUG] Found partial match: {map_key}")
                     break
+        
+        # Additional fallback: try to match by vulnerability ID pattern
+        if not img_path and image_map:
+            print(f"[POC DEBUG] Trying vulnerability ID pattern matching...")
+            vuln_pattern = sr_no_key.replace('vul-', '').replace('vul', '')
+            for map_key, map_path in image_map.items():
+                if vuln_pattern in map_key.lower():
+                    img_path = map_path
+                    print(f"[POC DEBUG] Found pattern match: {map_key}")
+                    break
+        
+        # Final fallback: try to find any image that contains the vulnerability ID
+        if not img_path and image_map:
+            print(f"[POC DEBUG] Final fallback: searching for any image with vulnerability ID...")
+            for map_key, map_path in image_map.items():
+                if sr_no_key in map_key.lower() or vuln_pattern in map_key.lower():
+                    img_path = map_path
+                    print(f"[POC DEBUG] Found final fallback match: {map_key}")
+                    break
+        
+        # Last resort: if we have any images at all, use the first one
+        if not img_path and image_map:
+            print(f"[POC DEBUG] Last resort: using first available image...")
+            first_key = list(image_map.keys())[0]
+            img_path = image_map[first_key]
+            print(f"[POC DEBUG] Using first available image: {first_key}")
         
         print(f"[POC IMAGE DEBUG] Step {idx}, Screenshot: {screenshot_name}, Keys tried: {possible_keys}, Found: {img_path}")
         if img_path and os.path.exists(img_path):
