@@ -49,6 +49,43 @@
             font-size: 0.9em;
             margin-right: 8px;
         }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #6923d0;
+        }
+        .logout-btn {
+            background: #ff4444;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        .logout-btn:hover {
+            background: #cc3333;
+        }
+        .nav-btn {
+            background: #6923d0;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background 0.3s;
+            margin-left: 10px;
+        }
+        .nav-btn:hover {
+            background: #5a1fb8;
+        }
         a.back-link {
             color: #8a2be2;
             text-decoration: underline;
@@ -60,13 +97,14 @@
 </head>
 <body>
     <div class="container">
-        <h1 style="display:flex;justify-content:space-between;align-items:center;">
-            <span>Report Generator</span>
-            <span style="font-size:0.9em">
-                <a href="/report_formats.html" style="color:#8a2be2;margin-right:14px;text-decoration:underline">Home</a>
-                <a id="navDashboard" href="/dashboard" style="color:#8a2be2;text-decoration:underline;display:none">Dashboard</a>
-            </span>
-        </h1>
+        <div class="header">
+            <h1 style="margin:0;color:#8a2be2;">Report Generator</h1>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <a href="/report_formats.html" class="nav-btn">Home</a>
+                <a id="navDashboard" href="/dashboard" class="nav-btn" style="display:none">Dashboard</a>
+                <a href="/logout" class="logout-btn">Logout</a>
+            </div>
+        </div>
         <p style="text-align:center; color:#ccc;">Below are the available report types and their structure/formatting details.</p>
 
         <div class="report-section">

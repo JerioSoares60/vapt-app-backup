@@ -20,9 +20,14 @@
     <div class="dashboard-container">
         <div class="dashboard-card" style="text-align:left;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <h2 style="margin:0">Dashboard</h2>
-                    <p style="margin:4px 0 0 0; color:#777">Welcome, {{ user.name }} ({{ user.email }})</p>
+                <div style="display:flex; align-items:center; gap:15px;">
+                    <a href="/report_formats.html" style="background:#2d6cdf;color:#fff;padding:8px 12px;border-radius:6px;text-decoration:none;font-weight:600;display:flex;align-items:center;gap:5px;">
+                        ← Report Generator
+                    </a>
+                    <div>
+                        <h2 style="margin:0">Dashboard</h2>
+                        <p style="margin:4px 0 0 0; color:#777">Welcome, {{ user.name }} ({{ user.email }})</p>
+                    </div>
                 </div>
                 <a href="/logout" class="logout">Logout</a>
             </div>
@@ -1104,7 +1109,35 @@
           const data = await response.json();
           if (data && data.rows && data.rows.length > 0) {
             ALL_ROWS = data.rows;
-            parseWorkbook({ Sheets: { 'Vulnerabilities': {} } }); // Use existing parsing logic
+            // Parse the data using existing logic
+            const total = ALL_ROWS.length;
+            const severity = group(ALL_ROWS, 'Severity');
+            const byEmployee = Object.entries(group(ALL_ROWS, 'ReportedBy')).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+            const testers = new Set(ALL_ROWS.map(r=>r.ReportedBy || r.EmpID).filter(Boolean)).size;
+            
+            // Project pivot
+            const projects = {};
+            ALL_ROWS.forEach(r=>{ const p=r.Project||'Unknown'; projects[p]=projects[p]||{Critical:0,High:0,Medium:0,Low:0,Informational:0}; projects[p][r.Severity]=(projects[p][r.Severity]||0)+1; });
+            const projectTotals = Object.fromEntries(Object.entries(projects).map(([k,v])=>[k, Object.values(v).reduce((s,n)=>s+n,0)]));
+            
+            // Employee table
+            const empMap={};
+            ALL_ROWS.forEach(r=>{
+              const key=(r.ReportedBy||r.EmpID||'').toString().trim();
+              if(!empMap[key]) empMap[key]={empId:r.EmpID||'', name:r.ReportedBy||r.EmpID||'', total:0, sev:{}};
+              empMap[key].total++;
+              empMap[key].sev[r.Severity]=(empMap[key].sev[r.Severity]||0)+1;
+            });
+            const empRows = Object.values(empMap).sort((a,b)=>b.total-a.total);
+            
+            // Render all components
+            renderSummary(total, testers);
+            renderEmployeePerformance(byEmployee);
+            renderProjectPerformance(projectTotals);
+            renderSeverityBreakdown(severity);
+            renderEmployeeData(empRows);
+            renderProjectDetails(projectTotals, ALL_ROWS);
+            
             $('#loadStatus').textContent = 'Latest dataset loaded successfully';
             showActions(true);
           } else {

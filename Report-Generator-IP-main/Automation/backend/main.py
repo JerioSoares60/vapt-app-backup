@@ -160,15 +160,44 @@ async def latest_dashboard_dataset(request: Request, db: Session = Depends(get_d
     row = db.query(DashboardDataset).order_by(DashboardDataset.uploaded_at.desc()).first()
     if not row:
         return {"status": "empty"}
-    return {
-        "id": row.id,
-        "title": row.title,
-        "project_name": row.project_name,
-        "uploaded_by_email": row.uploaded_by_email,
-        "uploaded_by_name": row.uploaded_by_name,
-        "uploaded_at": row.uploaded_at.isoformat(),
-        "file_path": row.file_path
-    }
+    
+    # Read the Excel file and return the data
+    try:
+        import pandas as pd
+        df = pd.read_excel(row.file_path)
+        df.columns = df.columns.str.strip()
+        
+        # Normalize headers
+        header_map = {
+            'empid': 'EmpID', 'emp id': 'EmpID', 'employee id': 'EmpID',
+            'reportedby': 'ReportedBy', 'reported by': 'ReportedBy', 'name': 'ReportedBy',
+            'project': 'Project',
+            'severity': 'Severity',
+            'date': 'Date', 'reportedon': 'Date',
+            'vulnerabilityname': 'VulnerabilityName', 'vulnerability name': 'VulnerabilityName'
+        }
+        
+        # Convert to list of dictionaries
+        rows = []
+        for _, row_data in df.iterrows():
+            row_dict = {}
+            for col in df.columns:
+                normalized_col = header_map.get(col.strip().lower(), col)
+                row_dict[normalized_col] = row_data[col]
+            rows.append(row_dict)
+        
+        return {
+            "id": row.id,
+            "title": row.title,
+            "project_name": row.project_name,
+            "uploaded_by_email": row.uploaded_by_email,
+            "uploaded_by_name": row.uploaded_by_name,
+            "uploaded_at": row.uploaded_at.isoformat(),
+            "rows": rows
+        }
+    except Exception as e:
+        print(f"Error reading dashboard data: {e}")
+        return {"status": "error", "message": str(e)}
 
 @router.get("/dashboard-datasets/{dataset_id}/file")
 async def download_dashboard_dataset_file(dataset_id: int, request: Request, db: Session = Depends(get_db)):
