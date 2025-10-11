@@ -4,6 +4,7 @@ from fastapi.responses import RedirectResponse
 from Automation.backend.main import app as type1_app
 from Automation.backend.type2 import app as type2_app
 from auth import router as auth_router
+from session_security import SessionSecurityMiddleware
 import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -24,6 +25,13 @@ app.add_middleware(
     https_only=False,  # Set to True for production with HTTPS
     same_site="lax",
     session_cookie="reportgen_session"
+)
+
+# Add session security middleware
+app.add_middleware(
+    SessionSecurityMiddleware,
+    session_timeout=3600,  # 1 hour
+    csrf_timeout=1800      # 30 minutes
 )
 
 # Include SSO authentication router

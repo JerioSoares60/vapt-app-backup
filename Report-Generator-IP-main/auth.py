@@ -21,6 +21,7 @@ from typing import Optional
 import json
 from db import get_db, AuditLog
 from sqlalchemy.orm import Session
+from session_security import create_secure_session, invalidate_session, get_csrf_token, refresh_csrf_token
 
 router = APIRouter()
 
@@ -155,7 +156,8 @@ def auth_callback(request: Request, code: Optional[str] = None, error: Optional[
         "email": user_email,
         "oid": claims.get("oid"),
     }
-    request.session["user"] = user_payload
+    # Create secure session with fingerprint and CSRF token
+    create_secure_session(request, user_payload)
     try:
         # Audit log for successful login
         db.add(AuditLog(
@@ -179,8 +181,18 @@ def __test_set_session(request: Request, email: str = Form("developer@cybersmith
         raise HTTPException(status_code=404, detail="Not Found")
     if not email.lower().endswith(f"@{ALLOWED_EMAIL_DOMAIN}"):
         raise HTTPException(status_code=400, detail="Invalid domain")
-    request.session["user"] = {"name": email.split("@")[0], "email": email}
+    # Create secure session for test mode
+    create_secure_session(request, {"name": email.split("@")[0], "email": email})
     return {"status": "ok"}
+
+# Test-only GET endpoint for easier testing
+@router.get("/auth/test-login")
+def test_login(request: Request):
+    if not TEST_MODE:
+        raise HTTPException(status_code=404, detail="Not Found")
+    # Create secure session for test mode
+    create_secure_session(request, {"name": "Test User", "email": "developer@cybersmithsecure.com"})
+    return RedirectResponse("/report_formats.html")
 
 # Compatibility endpoint expected by some test harnesses
 @router.post("/api/auth/azure_sso")
@@ -200,7 +212,8 @@ def api_auth_azure_sso(request: Request, email: Optional[str] = Form(default=Non
 
 @router.get("/logout")
 def logout(request: Request):
-    request.session.clear()
+    # Properly invalidate session with security cleanup
+    invalidate_session(request)
     return RedirectResponse("/login")
 
 def get_current_user(request: Request):
@@ -216,3 +229,27 @@ def me(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return {"name": user.get("name"), "email": user.get("email")}
+
+# CSRF token endpoints
+@router.get("/csrf-token")
+def get_csrf_token_endpoint(request: Request):
+    """Get current CSRF token"""
+    user = request.session.get("user")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = get_csrf_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="No valid session")
+    
+    return {"csrf_token": token}
+
+@router.post("/csrf-refresh")
+def refresh_csrf_token_endpoint(request: Request):
+    """Refresh CSRF token"""
+    user = request.session.get("user")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = refresh_csrf_token(request)
+    return {"csrf_token": token}
