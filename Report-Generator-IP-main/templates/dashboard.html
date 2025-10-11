@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Report Generator</title>
-    <script src="/static/js/csrf.js"></script>
+ b    <script src="/static/js/csrf.js"></script>
     <script src="/static/js/session-timeout.js"></script>
     <style>
         body { background: #f5f8ff; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
@@ -36,16 +36,10 @@
                     <label style="font-weight:700">Section</label>
                     <select id="sectionSel" style="padding:6px 8px;border:1px solid #cbd5ff;border-radius:6px">
                         <option value="current">Monitoring Dashboard</option>
-                        <option value="history">Project History</option>
                         <option value="previous">Previous Dashboards</option>
                         <option value="logs">Usage Logs</option>
                     </select>
                 </div>
-                <div id="uploadBox" style="display:none;">
-                    <label style="font-weight:600">Dashboard Excel (.xlsx)</label>
-                    <input id="dashfile" type="file" accept=".xlsx,.xls"/>
-                </div>
-                <button id="loadBtn" class="logout" style="background:#00b050; display:none;">Load</button>
                 <div id="loadStatus" style="color:#1a3a6b"></div>
                 <div id="actionsBox" style="display:none; gap:10px; align-items:flex-end;">
                     <div>
@@ -70,9 +64,7 @@
             </div>
             <div id="projectDetails" style="margin-top:8px;"></div>
             <div id="grid" style="margin-top:0px;"></div>
-            <div id="trendRow" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-                <canvas id="trend" height="160" style="flex:1; background:#f9fbff; border:1px solid #e6ecff; border-radius:8px; padding:8px"></canvas>
-            </div>
+            <!-- Trend chart removed as requested -->
             <div id="prevList" style="display:none; margin-top:8px"></div>
             <div id="logsList" style="display:none; margin-top:8px"></div>
             <div id="historyList" style="display:none; margin-top:8px"></div>
@@ -133,23 +125,118 @@
         const rows = ALL_ROWS.filter(r => (r.ReportedBy||'').toString().trim() === name);
         const bySeverity = rows.reduce((m,r)=>{ m[r.Severity]=(m[r.Severity]||0)+1; return m; },{});
         const byName = rows.reduce((m,r)=>{ const k=(r.VulnerabilityName||'').toString().trim(); m[k]=(m[k]||0)+1; return m; },{});
-        const namesList = Object.entries(byName).sort((a,b)=>b[1]-a[1]).slice(0,20);
+        
+        // Create modal to show detailed vulnerability information
         const modal = document.createElement('div');
         modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:9999';
-        modal.innerHTML = `<div style="width:720px;max-height:80vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.1);padding:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:800;color:#2d6cdf">${name} – Vulnerability Details</div><button id="mdlClose" style="border:0;background:#2d6cdf;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer">Close</button></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div><div style="font-weight:700;margin-bottom:6px">By Severity</div>
-              <table style="width:100%;border-collapse:collapse">${Object.entries(bySeverity).map(([k,v])=>`<tr><td style='padding:6px 8px;border-top:1px solid #eee'>${k}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>${v}</td></tr>`).join('')}</table>
+        
+        // Sort vulnerabilities by severity order
+        const severityOrder = {Critical: 1, High: 2, Medium: 3, Low: 4, Informational: 5, Unknown: 6};
+        const sortedVulns = Object.entries(byName).sort((a,b) => {
+          const [nameA] = a;
+          const [nameB] = b;
+          
+          // Find the most common severity for each vulnerability
+          const vulnRowsA = rows.filter(r => (r.VulnerabilityName || '').toString().trim() === nameA);
+          const vulnRowsB = rows.filter(r => (r.VulnerabilityName || '').toString().trim() === nameB);
+          
+          const severityCountsA = {};
+          const severityCountsB = {};
+          
+          vulnRowsA.forEach(r => {
+            const sev = r.Severity || 'Unknown';
+            severityCountsA[sev] = (severityCountsA[sev] || 0) + 1;
+          });
+          
+          vulnRowsB.forEach(r => {
+            const sev = r.Severity || 'Unknown';
+            severityCountsB[sev] = (severityCountsB[sev] || 0) + 1;
+          });
+          
+          // Get the most common severity for each vulnerability
+          const mostCommonSeverityA = Object.entries(severityCountsA).sort((a,b) => b[1] - a[1])[0]?.[0] || 'Unknown';
+          const mostCommonSeverityB = Object.entries(severityCountsB).sort((a,b) => b[1] - a[1])[0]?.[0] || 'Unknown';
+          
+          // Sort by severity order first, then by count if same severity
+          const orderA = severityOrder[mostCommonSeverityA] || 999;
+          const orderB = severityOrder[mostCommonSeverityB] || 999;
+          
+          if (orderA !== orderB) {
+            return orderA - orderB; // Sort by severity order
+          } else {
+            return b[1] - a[1]; // If same severity, sort by count (highest first)
+          }
+        });
+        
+        const severityColors = {
+          Critical: '#990000',
+          High: '#FF0000', 
+          Medium: '#FFCC00',
+          Low: '#00b050',
+          Informational: '#0070c0',
+          Unknown: '#666666'
+        };
+        
+        modal.innerHTML = `<div style="width:900px;max-height:85vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.1);padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <div style="font-weight:800;color:#2d6cdf;font-size:18px">${name} - Vulnerability Details</div>
+            <button id="empClose" style="border:0;background:#2d6cdf;color:#fff;border-radius:6px;padding:8px 16px;cursor:pointer">Close</button>
+          </div>
+          
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+            <div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+              <div style="font-weight:700;margin-bottom:8px;color:#333">Summary</div>
+              <div style="font-size:24px;font-weight:800;color:#2d6cdf">${rows.length}</div>
+              <div style="color:#666">Total Vulnerabilities</div>
             </div>
-            <div><div style="font-weight:700;margin-bottom:6px">Top Vulnerability Names</div>
-              <table style="width:100%;border-collapse:collapse">${namesList.map(([k,v])=>`<tr><td style='padding:6px 8px;border-top:1px solid #eee'>${k}</td><td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>${v}</td></tr>`).join('')}</table>
+            <div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+              <div style="font-weight:700;margin-bottom:8px;color:#333">Severity Breakdown</div>
+              ${Object.entries(bySeverity).sort((a,b) => (severityOrder[a[0]] || 999) - (severityOrder[b[0]] || 999)).map(([sev, count]) => `
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                  <span style="color:${severityColors[sev] || '#666'};font-weight:600">${sev}</span>
+                  <span style="font-weight:700">${count}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <div style="background:#f9fbff;border:1px solid #e6ecff;border-radius:8px;padding:12px">
+            <div style="font-weight:700;margin-bottom:12px;color:#333">Vulnerabilities Found</div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <tr style="background:#eef3ff">
+                  <th style="padding:8px;text-align:left;border-bottom:2px solid #e6ecff">Vulnerability</th>
+                  <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Count</th>
+                  <th style="padding:8px;text-align:center;border-bottom:2px solid #e6ecff">Severity</th>
+                  <th style="padding:8px;text-align:left;border-bottom:2px solid #e6ecff">Project</th>
+                </tr>
+                ${sortedVulns.map(([vulnName, count]) => {
+                  const vulnRows = rows.filter(r => (r.VulnerabilityName || '').toString().trim() === vulnName);
+                  const severityCounts = {};
+                  vulnRows.forEach(r => {
+                    const sev = r.Severity || 'Unknown';
+                    severityCounts[sev] = (severityCounts[sev] || 0) + 1;
+                  });
+                  const mostCommonSeverity = Object.entries(severityCounts).sort((a,b) => b[1] - a[1])[0]?.[0] || 'Unknown';
+                  const projects = [...new Set(vulnRows.map(r => r.Project || 'Unknown'))].join(', ');
+                  
+                  return `<tr>
+                    <td style='padding:6px 8px;border-top:1px solid #eee'>${vulnName}</td>
+                    <td style='padding:6px 8px;border-top:1px solid #eee;text-align:center;font-weight:700'>${count}</td>
+                    <td style='padding:6px 8px;border-top:1px solid #eee;text-align:center'>
+                      <span style="color:${severityColors[mostCommonSeverity] || '#666'};font-weight:600">${mostCommonSeverity}</span>
+                    </td>
+                    <td style='padding:6px 8px;border-top:1px solid #eee'>${projects}</td>
+                  </tr>`;
+                }).join('')}
+              </table>
             </div>
           </div>
         </div>`;
+        
         document.body.appendChild(modal);
-        modal.querySelector('#mdlClose').onclick = ()=> modal.remove();
-        modal.onclick = (e)=>{ if(e.target===modal) modal.remove(); };
+        modal.querySelector('#empClose').onclick = () => modal.remove();
+        modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
       }
       function renderSeverityBreakdown(map){
         const order=["Critical","High","Medium","Low","Informational"]; const color={Critical:'#990000',High:'#FF0000',Medium:'#FFCC00',Low:'#00b050',Informational:'#0070c0'}
@@ -1003,6 +1090,36 @@
           alert('Failed to load monthly overview: ' + err.message);
         }
       }
+
+      // Load latest dataset on page load
+      async function loadLatestDataset() {
+        try {
+          $('#loadStatus').textContent = 'Loading latest dataset...';
+          const response = await fetch('/type1/dashboard/latest-dataset');
+          if (!response.ok) {
+            $('#loadStatus').textContent = 'No data available';
+            return;
+          }
+          
+          const data = await response.json();
+          if (data && data.rows && data.rows.length > 0) {
+            ALL_ROWS = data.rows;
+            parseWorkbook({ Sheets: { 'Vulnerabilities': {} } }); // Use existing parsing logic
+            $('#loadStatus').textContent = 'Latest dataset loaded successfully';
+            showActions(true);
+          } else {
+            $('#loadStatus').textContent = 'No data available';
+          }
+        } catch (error) {
+          console.error('Error loading latest dataset:', error);
+          $('#loadStatus').textContent = 'Error loading data';
+        }
+      }
+
+      // Initialize dashboard on page load
+      document.addEventListener('DOMContentLoaded', () => {
+        loadLatestDataset();
+      });
     </script>
 </body>
 </html> 
