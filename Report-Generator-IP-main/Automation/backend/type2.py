@@ -1135,25 +1135,52 @@ def generate_word_report(
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Chart error: {e}")
 
-        # Sort vulnerabilities by severity before creating any tables
-        # Handle "No Vulnerability" entries properly in sorting
-        def sort_key(vuln):
+        # Sort vulnerabilities by severity order: Critical, High, Medium, Low, Informational, No Vulnerability
+        def get_severity_order(vuln):
             if vuln.get('is_no_vuln_box'):
-                return -1  # Put "No Vulnerability" entries at the end
-            cvss = vuln.get('cvss')
-            if cvss is None or cvss == '' or str(cvss).lower() == 'nan':
-                return 0
-            try:
-                return float(cvss)
-            except (ValueError, TypeError):
-                return 0
+                return 5  # No Vulnerability at the end
+            
+            # Get severity from the vulnerability data
+            severity = vuln.get('severity', '').strip()
+            if not severity:
+                # Try to get severity from CVSS score
+                cvss = vuln.get('cvss')
+                if cvss is not None and cvss != '' and str(cvss).lower() != 'nan':
+                    try:
+                        cvss_float = float(cvss)
+                        if cvss_float >= 9.0:
+                            severity = 'Critical'
+                        elif cvss_float >= 7.0:
+                            severity = 'High'
+                        elif cvss_float >= 4.0:
+                            severity = 'Medium'
+                        elif cvss_float >= 0.1:
+                            severity = 'Low'
+                        else:
+                            severity = 'Informational'
+                    except (ValueError, TypeError):
+                        severity = 'Informational'
+                else:
+                    severity = 'Informational'
+            
+            # Map severities to order numbers
+            severity_map = {
+                'Critical': 0,
+                'High': 1, 
+                'Medium': 2,
+                'Low': 3,
+                'Informational': 4,
+                'No Vulnerability': 5
+            }
+            return severity_map.get(severity, 6)  # Unknown gets highest number
         
-        # Keep per-IP grouping contiguous in the final document: first order by row input order,
-        # then by severity within the same IP block
+        # Sort vulnerabilities by severity order
         try:
+            vulnerabilities.sort(key=get_severity_order)
+        except Exception as e:
+            print(f"Error sorting vulnerabilities by severity: {e}")
+            # Fallback to original sorting
             vulnerabilities.sort(key=lambda v: (str(v.get('ip','')), v.get('row_order', 0)))
-        except Exception:
-            vulnerabilities.sort(key=sort_key, reverse=True)
         
         # Debug: Print vulnerabilities after sorting
         print(f"After sorting - Total vulnerabilities: {len(vulnerabilities)}")
@@ -2560,7 +2587,13 @@ def create_no_vuln_box(doc, vulnerability, display_sr_no=None, image_map=None):
     for step_idx, step in enumerate(unique_steps):
         step_para = cell.add_paragraph()
         step_para.paragraph_format.left_indent = Pt(10)
-        run = step_para.add_run(f"Step {step_idx+1}: {step['text']}")
+        # Clean the step text to remove any existing "Step X:" prefix
+        step_text = step['text'].strip()
+        if step_text.lower().startswith('step'):
+            # Remove "Step X:" prefix if it exists
+            import re
+            step_text = re.sub(r'^step\s*\d*\s*:\s*', '', step_text, flags=re.IGNORECASE).strip()
+        run = step_para.add_run(f"Step {step_idx+1}: {step_text}")
         run.font.name = 'Altone Trial'
         run.font.size = Pt(11)
         run.font.bold = False
