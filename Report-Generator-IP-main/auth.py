@@ -230,26 +230,21 @@ def me(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
     return {"name": user.get("name"), "email": user.get("email")}
 
-# CSRF token endpoints
+"""
+Public CSRF endpoints
+We allow CSRF token retrieval/refresh without requiring a logged-in user so that
+public generators (e.g., /type3) can operate without SSO.
+"""
 @router.get("/csrf-token")
 def get_csrf_token_endpoint(request: Request):
-    """Get current CSRF token"""
-    user = request.session.get("user")
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
+    """Return an existing CSRF token or create a new one if missing/expired."""
     token = get_csrf_token(request)
     if not token:
-        raise HTTPException(status_code=401, detail="No valid session")
-    
+        token = refresh_csrf_token(request)
     return {"csrf_token": token}
 
 @router.post("/csrf-refresh")
 def refresh_csrf_token_endpoint(request: Request):
-    """Refresh CSRF token"""
-    user = request.session.get("user")
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
+    """Refresh CSRF token for current session (no auth required)."""
     token = refresh_csrf_token(request)
     return {"csrf_token": token}
