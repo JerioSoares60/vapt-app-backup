@@ -59,7 +59,7 @@ def read_vulnerability_excel(file_path):
         print(f"Error reading vulnerability Excel: {e}")
         return []
 
-def process_poc_zip_files(poc_files, vulnerabilities):
+async def process_poc_zip_files(poc_files, vulnerabilities):
     """Process uploaded PoC zip files and map them to vulnerabilities"""
     poc_mapping = {}
     
