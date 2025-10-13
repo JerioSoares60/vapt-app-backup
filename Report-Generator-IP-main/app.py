@@ -4,6 +4,7 @@ from fastapi.responses import RedirectResponse
 from Automation.backend.main import app as type1_app
 from Automation.backend.type2 import app as type2_app
 from Automation.backend.type3 import app as type3_app
+from dashboard import dashboard_app
 from auth import router as auth_router
 from session_security import SessionSecurityMiddleware
 import os
@@ -71,6 +72,7 @@ app.mount("/type2", type2_app)
 
 # Mount the Type-3 (type3.py) app at /type3, protected by SSO
 app.mount("/type3", type3_app)
+app.mount("/dashboard", dashboard_app)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/Automation", StaticFiles(directory="Automation"), name="automation-static")
