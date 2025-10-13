@@ -482,6 +482,13 @@ def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
         
         def _normalize_print_statement(inner: str) -> str:
             # Keep dots for attribute access, replace other non word chars with underscores
+            # Special handling for common template patterns
+            inner = inner.strip()
+            
+            # Fix common template mismatches
+            if inner == "Audit.sr_no":
+                inner = "team.sr_no"
+            
             chars = []
             for ch in inner:
                 if re.match(r"[A-Za-z0-9_.]", ch):
@@ -1044,6 +1051,7 @@ async def root():
                 const auditingTeam = [];
                 for (let i = 0; i < teamNames.length; i++) {
                     auditingTeam.push({
+                        sr_no: i + 1,  // Add serial number for template
                         name: teamNames[i].value,
                         designation: teamDesignations[i].value,
                         email: teamEmails[i].value,
