@@ -503,6 +503,9 @@ async def root():
     <body>
         <div class="container">
             <h1>🔒 Cert-IN Report Generator</h1>
+            <div style="text-align:center;margin-bottom:16px;">
+                <a href="/report_formats.html" class="btn btn-secondary" style="text-decoration:none;display:inline-block;">← Back to Report Formats</a>
+            </div>
             <p style="text-align: center; color: #666; margin-bottom: 30px;">
                 Generate Cert-IN compliant reports with document control pages
             </p>
@@ -634,11 +637,11 @@ async def root():
                     <h3>🎯 Engagement Scope</h3>
                     <div id="engagementScopeList">
                         <div class="dynamic-item">
-                            <input type="number" name="scope_sr_no[]" placeholder="S. No" required>
-                            <input type="text" name="scope_asset[]" placeholder="Asset Description" required>
-                            <input type="text" name="scope_criticality[]" placeholder="Criticality" required>
+                            <input type="number" name="scope_sr_no[]" placeholder="S. No">
+                            <input type="text" name="scope_asset[]" placeholder="Asset Description">
+                            <input type="text" name="scope_criticality[]" placeholder="Criticality">
                             <input type="text" name="scope_internal_ip[]" placeholder="Internal IP">
-                            <input type="url" name="scope_url[]" placeholder="URL">
+                            <input type="text" name="scope_url[]" placeholder="URL or NA">
                             <input type="text" name="scope_public_ip[]" placeholder="Public IP">
                             <input type="text" name="scope_location[]" placeholder="Location">
                             <input type="text" name="scope_hash[]" placeholder="Hash Value">
@@ -756,6 +759,18 @@ async def root():
         </div>
 
         <script>
+            // CSRF token fetch
+            let CSRF_TOKEN = null;
+            (async () => {
+                try {
+                    const res = await fetch('/csrf-token', { credentials: 'same-origin' });
+                    if (res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        CSRF_TOKEN = data.csrf_token || data.token || data.csrf || null;
+                    }
+                } catch (_) {}
+            })();
+
             // Dynamic form functions
             function addChangeHistory() {
                 const container = document.getElementById('changeHistoryList');
@@ -960,7 +975,7 @@ async def root():
                         asset_description: scopeAssets[i].value,
                         criticality: scopeCriticalities[i].value,
                         internal_ip: scopeInternalIPs[i].value,
-                        url: scopeURLs[i].value,
+                        url: (scopeURLs[i].value && scopeURLs[i].value.toUpperCase() !== 'NA') ? scopeURLs[i].value : '',
                         public_ip: scopePublicIPs[i].value,
                         location: scopeLocations[i].value,
                         hash_value: scopeHashes[i].value,
@@ -1026,12 +1041,21 @@ async def root():
                     
                     const response = await fetch('/type3/generate-report/', {
                         method: 'POST',
-                        body: formData
+                        headers: CSRF_TOKEN ? { 'X-CSRF-Token': CSRF_TOKEN } : {},
+                        body: formData,
+                        credentials: 'same-origin'
                     });
                     
                     if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.detail || 'Report generation failed');
+                        let msg = 'Report generation failed';
+                        try {
+                            const errorData = await response.json();
+                            msg = errorData.detail || JSON.stringify(errorData);
+                        } catch (e) {
+                            const txt = await response.text();
+                            if (txt) msg = txt;
+                        }
+                        throw new Error(msg);
                     }
                     
                     const result = await response.json();

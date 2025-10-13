@@ -34,7 +34,12 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
         # Check CSRF for state-changing operations
         if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
             if not self._is_csrf_valid(request):
-                return Response("CSRF token invalid", status_code=403)
+                # Return JSON to avoid frontend JSON.parse errors
+                return Response(
+                    content=json.dumps({"detail": "CSRF token invalid"}),
+                    status_code=403,
+                    media_type="application/json"
+                )
         
         response = await call_next(request)
         return response
@@ -102,7 +107,14 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             return False
         
         # Check token from request
-        request_token = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
+        request_token = request.headers.get("X-CSRF-Token")
+        if not request_token:
+            try:
+                form = request.form
+                if form:
+                    request_token = form.get("csrf_token")
+            except Exception:
+                request_token = None
         return stored_token == request_token
     
     def _generate_session_fingerprint(self, request: Request) -> str:
