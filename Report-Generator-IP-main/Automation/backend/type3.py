@@ -15,6 +15,7 @@ import tempfile
 import json
 import re
 import zipfile
+import io
 from sqlalchemy.orm import Session
 from db import get_db, AuditLog, CertINReport
 
@@ -351,8 +352,10 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
 def generate_certin_report_from_form(data, template_path, output_path, vulnerability_data=None, poc_mapping=None):
     """Generate Cert-IN report from form data and template"""
     try:
-        # Load the template
-        doc = DocxTemplate(template_path)
+        # Sanitize Jinja placeholders inside the template to avoid invalid tokens
+        safe_template_path = _sanitize_docx_jinja_placeholders(template_path)
+        # Load the sanitized template
+        doc = DocxTemplate(safe_template_path)
         
         # Parse JSON fields
         document_change_history = json.loads(data.get('document_change_history', '[]'))
@@ -460,6 +463,49 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         print(f"Error generating report: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
+
+def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
+    """Create a sanitized copy of the DOCX where Jinja placeholders are normalized.
+    - Replaces any non-alphanumeric/underscore characters inside {{ ... }} and {% ... %}
+      with underscores so Jinja parser won't fail on tokens like 'Name of Tool'.
+    Returns path to a temp DOCX file.
+    """
+    try:
+        with open(template_path, 'rb') as f:
+            original_bytes = f.read()
+        zin = zipfile.ZipFile(io.BytesIO(original_bytes))
+        out_buf = io.BytesIO()
+        zout = zipfile.ZipFile(out_buf, 'w', zipfile.ZIP_DEFLATED)
+        pattern_expr = re.compile(r"(\{\{\s*)([^}]+?)(\s*\}\})")
+        pattern_block = re.compile(r"(\{%\s*)([^%]+?)(\s*%\})")
+        def _normalize(inner: str) -> str:
+            # Keep dots for attribute access, replace other non word chars with underscores
+            chars = []
+            for ch in inner:
+                if re.match(r"[A-Za-z0-9_.]", ch):
+                    chars.append(ch)
+                elif ch.isspace():
+                    chars.append('_')
+                else:
+                    chars.append('_')
+            return ''.join(chars)
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename.startswith('word/') and item.filename.endswith('.xml'):
+                xml = data.decode('utf-8', errors='ignore')
+                xml = pattern_expr.sub(lambda m: m.group(1) + _normalize(m.group(2)) + m.group(3), xml)
+                xml = pattern_block.sub(lambda m: m.group(1) + _normalize(m.group(2)) + m.group(3), xml)
+                data = xml.encode('utf-8')
+            zout.writestr(item, data)
+        zin.close()
+        zout.close()
+        # Write temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmpf:
+            tmpf.write(out_buf.getvalue())
+            return tmpf.name
+    except Exception:
+        # Fallback to original if anything fails
+        return template_path
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
