@@ -466,8 +466,8 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
 
 def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
     """Create a sanitized copy of the DOCX where Jinja placeholders are normalized.
-    - Replaces any non-alphanumeric/underscore characters inside {{ ... }} and {% ... %}
-      with underscores so Jinja parser won't fail on tokens like 'Name of Tool'.
+    - Only sanitizes {{ ... }} print statements, preserving {% ... %} control flow syntax
+    - Replaces non-alphanumeric/underscore/dot characters in print statements with underscores
     Returns path to a temp DOCX file.
     """
     try:
@@ -476,9 +476,11 @@ def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
         zin = zipfile.ZipFile(io.BytesIO(original_bytes))
         out_buf = io.BytesIO()
         zout = zipfile.ZipFile(out_buf, 'w', zipfile.ZIP_DEFLATED)
+        
+        # Only sanitize print statements {{ ... }}, leave control flow {% ... %} untouched
         pattern_expr = re.compile(r"(\{\{\s*)([^}]+?)(\s*\}\})")
-        pattern_block = re.compile(r"(\{%\s*)([^%]+?)(\s*%\})")
-        def _normalize(inner: str) -> str:
+        
+        def _normalize_print_statement(inner: str) -> str:
             # Keep dots for attribute access, replace other non word chars with underscores
             chars = []
             for ch in inner:
@@ -489,12 +491,13 @@ def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
                 else:
                     chars.append('_')
             return ''.join(chars)
+        
         for item in zin.infolist():
             data = zin.read(item.filename)
             if item.filename.startswith('word/') and item.filename.endswith('.xml'):
                 xml = data.decode('utf-8', errors='ignore')
-                xml = pattern_expr.sub(lambda m: m.group(1) + _normalize(m.group(2)) + m.group(3), xml)
-                xml = pattern_block.sub(lambda m: m.group(1) + _normalize(m.group(2)) + m.group(3), xml)
+                # Only sanitize print statements, preserve control flow syntax
+                xml = pattern_expr.sub(lambda m: m.group(1) + _normalize_print_statement(m.group(2)) + m.group(3), xml)
                 data = xml.encode('utf-8')
             zout.writestr(item, data)
         zin.close()
