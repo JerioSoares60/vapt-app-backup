@@ -69,8 +69,8 @@ def process_poc_zip_files(poc_files, vulnerabilities):
             
         # Save zip file temporarily
         temp_zip_path = os.path.join(UPLOAD_DIR, f"temp_{poc_file.filename}")
+        content = await poc_file.read()
         with open(temp_zip_path, "wb") as f:
-            content = await poc_file.read()
             f.write(content)
         
         # Extract zip file to a common directory
@@ -1076,8 +1076,8 @@ async def generate_report(
             # Save uploaded file temporarily
             vulnerability_file = data['vulnerability_file']
             temp_path = os.path.join(UPLOAD_DIR, f"temp_vuln_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+            content = await vulnerability_file.read()
             with open(temp_path, "wb") as f:
-                content = await vulnerability_file.read()
                 f.write(content)
             
             # Read vulnerability data
