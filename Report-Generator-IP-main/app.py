@@ -106,7 +106,7 @@ async def dashboard(request: Request):
     # Only allow specific users to access dashboard
     user = request.session.get("user")
     if not user:
-        return RedirectResponse("/login")
+        return HTMLResponse("Forbidden", status_code=403)
     allowed = {"sarvesh.salgaonkar@cybersmithsecure.com", "smith.gonsalves@cybersmithsecure.com", "developer@cybersmithsecure.com"}
     if user.get("email", "").lower() not in allowed:
         return HTMLResponse("Forbidden", status_code=403)

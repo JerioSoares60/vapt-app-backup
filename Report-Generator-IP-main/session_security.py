@@ -54,7 +54,10 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             "/auth/test-login",
             "/__test/set-session",
             "/static/",
-            "/report_formats.html"
+            "/report_formats.html",
+            "/csrf-token",
+            "/csrf-refresh",
+            "/type3/"
         ]
         return any(request.url.path.startswith(path) for path in skip_paths)
     
@@ -64,7 +67,7 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             "/dashboard",
             "/type1/",
             "/type2/",
-            "/type3/",
+            # '/type3/' intentionally not protected to allow generator without login
             "/me"
         ]
         return any(request.url.path.startswith(path) for path in protected_paths)
