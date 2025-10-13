@@ -29,7 +29,12 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
         # Check session validity
         if not self._is_session_valid(request):
             if self._is_protected_endpoint(request):
-                return Response("Session expired", status_code=401)
+                # Return JSON (not plain text) so frontends parsing JSON don't break
+                return Response(
+                    content=json.dumps({"detail": "Session expired"}),
+                    status_code=401,
+                    media_type="application/json"
+                )
         
         # Check CSRF for state-changing operations
         if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
@@ -57,7 +62,8 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             "/report_formats.html",
             "/csrf-token",
             "/csrf-refresh",
-            "/type3/"
+            "/type3/",
+            "/type2/"
         ]
         return any(request.url.path.startswith(path) for path in skip_paths)
     
@@ -66,7 +72,7 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
         protected_paths = [
             "/dashboard",
             "/type1/",
-            "/type2/",
+            # '/type2/' intentionally not protected to avoid breaking generator
             # '/type3/' intentionally not protected to allow generator without login
             "/me"
         ]
