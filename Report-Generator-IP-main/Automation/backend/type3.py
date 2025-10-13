@@ -1092,15 +1092,15 @@ async def root():
 @app.post("/generate-report/")
 async def generate_report(
     request: Request,
-    db: Session = Depends(get_db),
-    **form_data
+    db: Session = Depends(get_db)
 ):
     """Generate Cert-IN report from form data"""
     try:
         print(f"Starting Cert-IN report generation from form - Version {VERSION}")
         
-        # Extract form data
-        data = dict(form_data)
+        # Extract form data robustly from multipart form
+        form = await request.form()
+        data = {k: form.get(k) for k in form.keys()}
         
         # Handle vulnerability file upload if provided
         vulnerability_data = []
