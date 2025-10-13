@@ -1,183 +1,165 @@
 """
-Session Security Module
-Implements comprehensive session security including:
-- Session timeout
-- Session fingerprinting (IP + User-Agent)
-- CSRF protection
-- Session validation
+Session Security Module for VAPT Report Generator
+Provides secure session management with CSRF protection and session fingerprinting
 """
 
 import os
 import hashlib
-import time
 import secrets
+import time
 from typing import Optional, Dict, Any
-from fastapi import Request, HTTPException, Response
+from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import RedirectResponse
+from starlette.responses import Response
 import json
 
-
 class SessionSecurityMiddleware(BaseHTTPMiddleware):
-    """Middleware for session security validation"""
+    """Middleware for session security with timeout and CSRF protection"""
     
     def __init__(self, app, session_timeout: int = 3600, csrf_timeout: int = 1800):
         super().__init__(app)
-        self.session_timeout = session_timeout  # 1 hour default
-        self.csrf_timeout = csrf_timeout  # 30 minutes default
-        
-    def _generate_session_fingerprint(self, request: Request) -> str:
-        """Generate a unique fingerprint based on IP and User-Agent"""
-        ip = request.client.host if request.client else "unknown"
-        user_agent = request.headers.get("user-agent", "")
-        fingerprint_data = f"{ip}:{user_agent}"
-        return hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]
-    
-    def _is_session_valid(self, session_data: Dict[str, Any], fingerprint: str, request: Request) -> bool:
-        """Check if session is valid and not expired"""
-        if not session_data:
-            return False
-            
-        # Check if session has user data
-        if "user" not in session_data:
-            return False
-            
-        # Check session timeout
-        session_time = session_data.get("session_time", 0)
-        if time.time() - session_time > self.session_timeout:
-            return False
-            
-        # Check session fingerprint
-        stored_fingerprint = session_data.get("fingerprint")
-        if stored_fingerprint != fingerprint:
-            return False
-            
-        return True
-    
-    def _generate_csrf_token(self) -> str:
-        """Generate a CSRF token"""
-        return secrets.token_urlsafe(32)
-    
-    def _is_csrf_token_valid(self, session_data: Dict[str, Any], token: str) -> bool:
-        """Check if CSRF token is valid and not expired"""
-        if not session_data or not token:
-            return False
-            
-        stored_token = session_data.get("csrf_token")
-        token_time = session_data.get("csrf_time", 0)
-        
-        if not stored_token or stored_token != token:
-            return False
-            
-        # Check CSRF token timeout
-        if time.time() - token_time > self.csrf_timeout:
-            return False
-            
-        return True
+        self.session_timeout = session_timeout
+        self.csrf_timeout = csrf_timeout
     
     async def dispatch(self, request: Request, call_next):
-        """Process request and validate session security"""
-        path = request.url.path
+        # Skip security checks for certain paths
+        if self._should_skip_security(request):
+            return await call_next(request)
         
-        # Skip security checks for login, callback, logout, and static files
-        skip_paths = ["/login", "/auth/", "/logout", "/health", "/static/", "/favicon.ico"]
-        if any(path.startswith(skip) for skip in skip_paths):
-            response = await call_next(request)
-            return response
+        # Check session validity
+        if not self._is_session_valid(request):
+            if self._is_protected_endpoint(request):
+                return Response("Session expired", status_code=401)
         
-        # Check if session middleware is available
-        if "session" not in request.scope:
-            # If no session middleware, just proceed without security checks
-            response = await call_next(request)
-            return response
-        
-        # Get current session
-        try:
-            session_data = request.session
-        except Exception as e:
-            # If session access fails, proceed without security checks
-            print(f"Session access failed: {e}")
-            response = await call_next(request)
-            return response
-        
-        # Generate current fingerprint
-        current_fingerprint = self._generate_session_fingerprint(request)
-        
-        # Check if session is valid
-        if not self._is_session_valid(session_data, current_fingerprint, request):
-            # Clear invalid session
-            request.session.clear()
-            
-            # For API endpoints, return 401
-            if path.startswith("/api/") or path.startswith("/type1/") or path.startswith("/type2/"):
-                return Response("Unauthorized - Session expired or invalid", status_code=401)
-            
-            # For web pages, redirect to login
-            return RedirectResponse("/login", status_code=302)
-        
-        # For POST requests, validate CSRF token
-        if request.method == "POST" and not path.startswith("/auth/"):
-            csrf_token = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
-            if not self._is_csrf_token_valid(session_data, csrf_token):
-                return Response("CSRF token invalid or expired", status_code=403)
-        
-        # Update session timestamp on each request
-        session_data["last_activity"] = time.time()
+        # Check CSRF for state-changing operations
+        if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
+            if not self._is_csrf_valid(request):
+                return Response("CSRF token invalid", status_code=403)
         
         response = await call_next(request)
-        
-        # Add security headers
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        
         return response
-
-
-def create_secure_session(request: Request, user_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a new secure session with fingerprint and CSRF token"""
-    fingerprint = SessionSecurityMiddleware(None)._generate_session_fingerprint(request)
-    csrf_token = SessionSecurityMiddleware(None)._generate_csrf_token()
     
-    session_data = {
-        "user": user_data,
-        "session_time": time.time(),
-        "last_activity": time.time(),
-        "fingerprint": fingerprint,
-        "csrf_token": csrf_token,
-        "csrf_time": time.time()
-    }
+    def _should_skip_security(self, request: Request) -> bool:
+        """Skip security checks for public endpoints"""
+        skip_paths = [
+            "/health",
+            "/login",
+            "/auth/login",
+            "/auth/callback",
+            "/auth/test-login",
+            "/__test/set-session",
+            "/static/",
+            "/report_formats.html"
+        ]
+        return any(request.url.path.startswith(path) for path in skip_paths)
     
-    request.session.update(session_data)
-    return session_data
+    def _is_protected_endpoint(self, request: Request) -> bool:
+        """Check if endpoint requires authentication"""
+        protected_paths = [
+            "/dashboard",
+            "/type1/",
+            "/type2/",
+            "/type3/",
+            "/me"
+        ]
+        return any(request.url.path.startswith(path) for path in protected_paths)
+    
+    def _is_session_valid(self, request: Request) -> bool:
+        """Check if session is valid and not expired"""
+        session = request.session
+        if not session.get("user"):
+            return False
+        
+        # Check session timestamp
+        session_time = session.get("_session_time")
+        if not session_time:
+            return False
+        
+        if time.time() - session_time > self.session_timeout:
+            return False
+        
+        # Check session fingerprint
+        stored_fingerprint = session.get("_session_fingerprint")
+        current_fingerprint = self._generate_session_fingerprint(request)
+        
+        return stored_fingerprint == current_fingerprint
+    
+    def _is_csrf_valid(self, request: Request) -> bool:
+        """Check CSRF token validity"""
+        # Skip CSRF for certain endpoints
+        if request.url.path in ["/auth/login", "/auth/callback"]:
+            return True
+        
+        session = request.session
+        stored_token = session.get("_csrf_token")
+        stored_time = session.get("_csrf_time")
+        
+        if not stored_token or not stored_time:
+            return False
+        
+        # Check CSRF token timeout
+        if time.time() - stored_time > self.csrf_timeout:
+            return False
+        
+        # Check token from request
+        request_token = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
+        return stored_token == request_token
+    
+    def _generate_session_fingerprint(self, request: Request) -> str:
+        """Generate session fingerprint from request characteristics"""
+        user_agent = request.headers.get("user-agent", "")
+        accept_language = request.headers.get("accept-language", "")
+        accept_encoding = request.headers.get("accept-encoding", "")
+        
+        fingerprint_data = f"{user_agent}:{accept_language}:{accept_encoding}"
+        return hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]
 
+def create_secure_session(request: Request, user_data: Dict[str, Any]) -> None:
+    """Create a secure session with fingerprinting and CSRF token"""
+    session = request.session
+    
+    # Store user data
+    session["user"] = user_data
+    
+    # Set session timestamp
+    session["_session_time"] = time.time()
+    
+    # Generate and store session fingerprint
+    session["_session_fingerprint"] = _generate_session_fingerprint(request)
+    
+    # Generate and store CSRF token
+    session["_csrf_token"] = secrets.token_urlsafe(32)
+    session["_csrf_time"] = time.time()
+
+def invalidate_session(request: Request) -> None:
+    """Properly invalidate session with security cleanup"""
+    session = request.session
+    session.clear()
 
 def get_csrf_token(request: Request) -> Optional[str]:
     """Get current CSRF token from session"""
-    session_data = request.session
-    if not session_data or not session_data.get("user"):
+    session = request.session
+    stored_time = session.get("_csrf_time")
+    
+    # Check if token is expired
+    if stored_time and time.time() - stored_time > 1800:  # 30 minutes
         return None
-    return session_data.get("csrf_token")
-
-
-def validate_csrf_token(request: Request, token: str) -> bool:
-    """Validate CSRF token"""
-    session_data = request.session
-    if not session_data:
-        return False
-    return SessionSecurityMiddleware(None)._is_csrf_token_valid(session_data, token)
-
-
-def invalidate_session(request: Request):
-    """Invalidate current session"""
-    request.session.clear()
-
+    
+    return session.get("_csrf_token")
 
 def refresh_csrf_token(request: Request) -> str:
-    """Refresh CSRF token and return new token"""
-    csrf_token = SessionSecurityMiddleware(None)._generate_csrf_token()
-    request.session["csrf_token"] = csrf_token
-    request.session["csrf_time"] = time.time()
-    return csrf_token
+    """Refresh CSRF token"""
+    session = request.session
+    new_token = secrets.token_urlsafe(32)
+    session["_csrf_token"] = new_token
+    session["_csrf_time"] = time.time()
+    return new_token
+
+def _generate_session_fingerprint(request: Request) -> str:
+    """Generate session fingerprint from request characteristics"""
+    user_agent = request.headers.get("user-agent", "")
+    accept_language = request.headers.get("accept-language", "")
+    accept_encoding = request.headers.get("accept-encoding", "")
+    
+    fingerprint_data = f"{user_agent}:{accept_language}:{accept_encoding}"
+    return hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]

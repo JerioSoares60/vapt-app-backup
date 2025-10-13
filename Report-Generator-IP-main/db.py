@@ -84,6 +84,40 @@ class ProjectEvaluationEvent(Base):
     uploaded_by_name = Column(String(255), nullable=True)
 
 
+class CertINReport(Base):
+    __tablename__ = "certin_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_name = Column(String(255), nullable=False)
+    report_name = Column(String(255), nullable=False)
+    report_release_date = Column(String(50), nullable=False)
+    type_of_audit = Column(String(255), nullable=False)
+    type_of_audit_report = Column(String(255), nullable=False)
+    period = Column(String(100), nullable=False)
+    document_title = Column(String(255), nullable=False)
+    document_id = Column(String(100), nullable=False)
+    document_version = Column(String(50), nullable=False)
+    prepared_by = Column(String(255), nullable=False)
+    reviewed_by = Column(String(255), nullable=False)
+    approved_by = Column(String(255), nullable=False)
+    released_by = Column(String(255), nullable=False)
+    release_date = Column(String(50), nullable=False)
+    
+    # JSON fields for complex data
+    document_change_history = Column(Text, nullable=True)  # JSON array
+    distribution_list = Column(Text, nullable=True)  # JSON array
+    engagement_scope = Column(Text, nullable=True)  # JSON array
+    auditing_team = Column(Text, nullable=True)  # JSON array
+    audit_activities = Column(Text, nullable=True)  # JSON array
+    tools_software = Column(Text, nullable=True)  # JSON array
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by_email = Column(String(255), nullable=False)
+    created_by_name = Column(String(255), nullable=True)
+    file_path = Column(String(1024), nullable=True)  # Path to generated report
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
@@ -94,5 +128,16 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+def test_connection() -> bool:
+    """Test database connection"""
+    try:
+        db = SessionLocal()
+        # Simple query to test connection
+        db.execute("SELECT 1")
+        db.close()
+        return True
+    except Exception:
+        return False
 
 

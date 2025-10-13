@@ -189,14 +189,15 @@
         <div class="report-section">
             <h2 style="display: flex; align-items: center; justify-content: space-between;">
                 Cert-IN Report (Web)
-                <button style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: not-allowed; opacity: 0.6; margin-left: 10px;" disabled>Coming Soon</button>
+                <button onclick="openCertINGenerator()" style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; margin-left: 10px;">Generate Report</button>
             </h2>
             <ul>
                 <li>Format as per Cert-IN guidelines for web applications</li>
-                <li>Includes compliance mapping, summary, and detailed findings</li>
-                <li>Special sections for regulatory requirements</li>
+                <li>Document control pages (1, 4, 5, 6, 7) with structured data</li>
+                <li>Includes auditing team, activities, tools, and distribution lists</li>
+                <li>Excel template-based input for maximum efficiency</li>
             </ul>
-            <p style="color:#ffcc00;">Coming soon.</p>
+            <p style="color:#4CAF50;">✅ Available - Upload Excel template and generate Cert-IN compliant reports</p>
         </div>
 
         <div class="report-section">
@@ -212,6 +213,51 @@
             <p style="color:#ffcc00;">Coming soon.</p>
         </div>
     </div>
+    <!-- Cert-IN Report Generator Modal -->
+    <div id="certinModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close" onclick="closeCertINModal()">&times;</span>
+            <h2>Cert-IN Report Generator</h2>
+            <p>Generate Cert-IN compliant reports from Excel templates. Download the template, fill in your data, and upload to generate the report.</p>
+            
+            <div style="margin: 20px 0;">
+                <button onclick="downloadCertINTemplate()" style="background-color: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+                    📥 Download Excel Template
+                </button>
+                <button onclick="showCertINInstructions()" style="background-color: #2196F3; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+                    📋 View Instructions
+                </button>
+            </div>
+            
+            <form id="certinForm" enctype="multipart/form-data">
+                <div style="margin: 20px 0;">
+                    <label for="certinFile" style="display: block; margin-bottom: 5px; font-weight: bold;">Upload Excel File:</label>
+                    <input type="file" id="certinFile" name="file" accept=".xlsx,.xls" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                </div>
+                
+                <div style="margin: 20px 0;">
+                    <label for="certinClientName" style="display: block; margin-bottom: 5px; font-weight: bold;">Client Name:</label>
+                    <input type="text" id="certinClientName" name="client_name" required placeholder="Enter client name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                </div>
+                
+                <div style="margin: 20px 0;">
+                    <button type="submit" style="background-color: #6923d0; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px;">
+                        🚀 Generate Cert-IN Report
+                    </button>
+                </div>
+            </form>
+            
+            <div id="certinProgress" style="display: none; margin: 20px 0;">
+                <div style="background-color: #f0f0f0; border-radius: 4px; padding: 10px;">
+                    <div id="certinProgressText">Processing...</div>
+                    <div style="background-color: #6923d0; height: 20px; border-radius: 4px; width: 0%; transition: width 0.3s;" id="certinProgressBar"></div>
+                </div>
+            </div>
+            
+            <div id="certinResult" style="display: none; margin: 20px 0;"></div>
+        </div>
+    </div>
+
     <script>
       // Reveal Dashboard top nav only for specific emails
       (async function() {
@@ -227,6 +273,130 @@
           // ignore
         }
       })();
+
+      // Cert-IN Report Generator Functions
+      function openCertINGenerator() {
+        // Redirect to the new form-based interface
+        window.open('/type3/', '_blank');
+      }
+
+      function closeCertINModal() {
+        document.getElementById('certinModal').style.display = 'none';
+        document.getElementById('certinForm').reset();
+        document.getElementById('certinProgress').style.display = 'none';
+        document.getElementById('certinResult').style.display = 'none';
+      }
+
+      function downloadCertINTemplate() {
+        window.open('/type3/download-template/', '_blank');
+      }
+
+      function showCertINInstructions() {
+        alert(`Cert-IN Report Generator Instructions:
+
+1. Download the Excel template using the button above
+2. Fill in all required sheets:
+   - Report_Details: Basic report information
+   - Auditing_Team: Team members and qualifications
+   - Audit_Activities: Timeline and activities
+   - Tools_Software: Tools used in assessment
+   - Document_Control: Version history
+   - Distribution_List: Report distribution
+
+3. Save the Excel file and upload it here
+4. Enter the client name
+5. Click "Generate Cert-IN Report"
+
+The system will generate a Word document with all document control pages (1, 4, 5, 6, 7) populated from your Excel data.`);
+      }
+
+      // Handle Cert-IN form submission
+      document.getElementById('certinForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData();
+        const fileInput = document.getElementById('certinFile');
+        const clientName = document.getElementById('certinClientName').value;
+        
+        if (!fileInput.files[0]) {
+          alert('Please select an Excel file');
+          return;
+        }
+        
+        // First upload the file
+        const uploadFormData = new FormData();
+        uploadFormData.append('file', fileInput.files[0]);
+        
+        try {
+          document.getElementById('certinProgress').style.display = 'block';
+          document.getElementById('certinProgressText').textContent = 'Uploading file...';
+          document.getElementById('certinProgressBar').style.width = '25%';
+          
+          const uploadResponse = await fetch('/type3/upload/', {
+            method: 'POST',
+            body: uploadFormData
+          });
+          
+          if (!uploadResponse.ok) {
+            throw new Error('Upload failed');
+          }
+          
+          const uploadResult = await uploadResponse.json();
+          
+          document.getElementById('certinProgressText').textContent = 'Generating report...';
+          document.getElementById('certinProgressBar').style.width = '50%';
+          
+          // Then generate the report
+          const generateFormData = new FormData();
+          generateFormData.append('file_path', uploadResult.file_path);
+          generateFormData.append('client_name', clientName);
+          
+          const generateResponse = await fetch('/type3/generate-report/', {
+            method: 'POST',
+            body: generateFormData
+          });
+          
+          if (!generateResponse.ok) {
+            const errorData = await generateResponse.json();
+            throw new Error(errorData.detail || 'Report generation failed');
+          }
+          
+          const generateResult = await generateResponse.json();
+          
+          document.getElementById('certinProgressText').textContent = 'Report generated successfully!';
+          document.getElementById('certinProgressBar').style.width = '100%';
+          
+          // Show success message and download link
+          document.getElementById('certinResult').innerHTML = `
+            <div style="background-color: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 4px;">
+              <h3>✅ Report Generated Successfully!</h3>
+              <p><strong>Filename:</strong> ${generateResult.filename}</p>
+              <a href="${generateResult.download_url}" download style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">
+                📥 Download Report
+              </a>
+            </div>
+          `;
+          document.getElementById('certinResult').style.display = 'block';
+          
+        } catch (error) {
+          document.getElementById('certinProgress').style.display = 'none';
+          document.getElementById('certinResult').innerHTML = `
+            <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 4px;">
+              <h3>❌ Error</h3>
+              <p>${error.message}</p>
+            </div>
+          `;
+          document.getElementById('certinResult').style.display = 'block';
+        }
+      });
+
+      // Close modal when clicking outside
+      window.onclick = function(event) {
+        const modal = document.getElementById('certinModal');
+        if (event.target === modal) {
+          closeCertINModal();
+        }
+      }
     </script>
 </body>
 </html> 
