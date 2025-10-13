@@ -146,7 +146,10 @@
         <div class="report-section">
             <h2 style="display: flex; align-items: center; justify-content: space-between;">
                 Cert-IN Report (Web)
-                <button onclick="openCertINGenerator()" style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; margin-left: 10px;">Generate Report</button>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="openCertINGenerator()" style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer;">Generate Report</button>
+                    <button onclick="openEmployeeDashboard()" style="background-color: #28a745; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer;">📊 Employee Dashboard</button>
+                </div>
             </h2>
             <ul>
                 <li>Format as per Cert-IN guidelines for web applications</li>
@@ -222,6 +225,11 @@
       function openCertINGenerator() {
         // Redirect to the new form-based interface
         window.open('/type3/', '_blank');
+      }
+
+      function openEmployeeDashboard() {
+        // Open employee performance dashboard
+        window.open('/type3/employee-dashboard/', '_blank');
       }
 
       function closeCertINModal() {
