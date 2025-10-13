@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Depends
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 import os
 import pandas as pd
 from docxtpl import DocxTemplate
@@ -21,6 +22,15 @@ from db import get_db, AuditLog, CertINReport
 VERSION = "2.0.0"
 
 app = FastAPI()
+
+# Add session middleware for session access
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET_KEY", "supersecret"),
+    https_only=False,  # Set to True for production with HTTPS
+    same_site="lax",
+    session_cookie="reportgen_session"
+)
 
 # Add CORS middleware
 app.add_middleware(
