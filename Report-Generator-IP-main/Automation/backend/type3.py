@@ -1195,48 +1195,51 @@ async def generate_report(
     """Generate Cert-IN report from form data"""
     try:
         print(f"Starting Cert-IN report generation from form - Version {VERSION}")
-        
-        # Extract form data robustly from multipart form
+
+        # Extract form data
         form = await request.form()
         data = {k: form.get(k) for k in form.keys()}
-        
-        # Handle vulnerability file upload if provided
+
         vulnerability_data = []
         poc_mapping = {}
-        
+
+        # Handle vulnerability file upload
         if 'vulnerability_file' in data and data['vulnerability_file']:
-            # Save uploaded file temporarily
             vulnerability_file = data['vulnerability_file']
             temp_path = os.path.join(UPLOAD_DIR, f"temp_vuln_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
             content = await vulnerability_file.read()
             with open(temp_path, "wb") as f:
                 f.write(content)
-            
-            # Read vulnerability data
+
             vulnerability_data = read_vulnerability_excel(temp_path)
-            
-            # Clean up temp file
             os.remove(temp_path)
-        
+
         # Handle PoC zip file if provided
         if 'poc_files' in data and data['poc_files']:
             poc_file = data['poc_files']
             poc_mapping = await process_poc_zip_files([poc_file], vulnerability_data)
-        
+
         # Template path
         template_path = os.path.join(os.path.dirname(__file__), "CSS Certin temp.docx")
         if not os.path.exists(template_path):
             raise HTTPException(status_code=404, detail="Cert-IN template not found")
-        
-        # Generate output filename
+
+        # Generate report filename
         client_name = data.get('client_name', 'Client')
-        report_filename = f"{client_name} Cert-IN Report {datetime.now().strftime('%Y-%d-%m')}.docx"
-        output_path = os.path.join(UPLOAD_DIR, report_filename)
-        
-        # Generate report with vulnerability data and PoC mapping
+        raw_filename = f"{client_name} Cert-IN Report {datetime.now().strftime('%Y-%d-%m')}.docx"
+        output_path = os.path.join(UPLOAD_DIR, raw_filename)
+
+        # Generate the report file
         generate_certin_report_from_form(data, template_path, output_path, vulnerability_data, poc_mapping)
-        
-        # Save to database
+
+        # ✅ Sanitize and rename output file (fix for spaces)
+        safe_filename = os.path.basename(output_path).replace(" ", "_")
+        safe_output_path = os.path.join(os.path.dirname(output_path), safe_filename)
+
+        if output_path != safe_output_path:
+            os.rename(output_path, safe_output_path)
+
+        # Save report details in DB
         try:
             user = request.session.get('user') or {}
             certin_report = CertINReport(
@@ -1262,15 +1265,15 @@ async def generate_report(
                 tools_software=data.get('tools_software', '[]'),
                 created_by_email=user.get('email', 'unknown'),
                 created_by_name=user.get('name'),
-                file_path=output_path
+                file_path=safe_output_path
             )
             db.add(certin_report)
             db.commit()
         except Exception as e:
             print(f"Error saving to database: {e}")
-        
+
         print(f"Cert-IN report generation completed successfully - Version {VERSION}")
-        
+
         # Log the action
         try:
             user = request.session.get('user') or {}
@@ -1294,20 +1297,18 @@ async def generate_report(
         except Exception as e:
             print(f"Error logging audit: {e}")
 
-            safe_filename = os.path.basename(output_path).replace(" ", "_")
-            safe_output_path = os.path.join(os.path.dirname(output_path), safe_filename)
-            os.rename(output_path, safe_output_path)
+        # ✅ Final response
         return JSONResponse(
             content={
                 "message": "Cert-IN report generated successfully",
-                "filename": report_filename,
+                "filename": safe_filename,
                 "download_url": f"/type3/download/{safe_filename}",
                 "vulnerability_count": len(vulnerability_data),
                 "poc_count": len(poc_mapping)
             },
             status_code=200
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
