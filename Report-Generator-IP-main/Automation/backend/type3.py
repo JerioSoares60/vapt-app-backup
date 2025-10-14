@@ -1298,7 +1298,7 @@ async def generate_report(
             content={
                 "message": "Cert-IN report generated successfully",
                 "filename": report_filename,
-                "download_url": f"/type3/download/{os.path.basename(output_path)}",
+                "download_url": f"/type3/download/{safe_filename}",
                 "vulnerability_count": len(vulnerability_data),
                 "poc_count": len(poc_mapping)
             },
