@@ -1293,7 +1293,10 @@ async def generate_report(
             db.commit()
         except Exception as e:
             print(f"Error logging audit: {e}")
-        
+
+            safe_filename = os.path.basename(output_path).replace(" ", "_")
+            safe_output_path = os.path.join(os.path.dirname(output_path), safe_filename)
+            os.rename(output_path, safe_output_path)
         return JSONResponse(
             content={
                 "message": "Cert-IN report generated successfully",
