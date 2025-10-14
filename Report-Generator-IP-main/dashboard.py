@@ -19,9 +19,17 @@ def extract_employee_data_from_excel(file_path):
         df = pd.read_excel(file_path)
         employees = {}
         
-        if 'Tester_Name' in df.columns:
+        # Check for various employee name columns
+        employee_columns = ['Tester_Name', 'ReportedBy', 'Tester', 'Employee_Name', 'Name']
+        employee_col = None
+        for col in employee_columns:
+            if col in df.columns:
+                employee_col = col
+                break
+        
+        if employee_col:
             for _, row in df.iterrows():
-                tester_name = str(row.get('Tester_Name', '')).strip()
+                tester_name = str(row.get(employee_col, '')).strip()
                 if tester_name and tester_name != 'nan':
                     if tester_name not in employees:
                         employees[tester_name] = {
@@ -33,7 +41,9 @@ def extract_employee_data_from_excel(file_path):
                             'low': 0,
                             'info': 0,
                             'reports_generated': 0,
-                            'last_activity': None
+                            'last_activity': None,
+                            'client_name': str(row.get('Client_Name', '')).strip() or 'Unknown',
+                            'project_name': str(row.get('Project', '')).strip() or 'Unknown'
                         }
                     
                     employees[tester_name]['total_vulnerabilities'] += 1
@@ -56,17 +66,17 @@ def extract_employee_data_from_excel(file_path):
         print(f"Error extracting employee data: {e}")
         return []
 
-def get_usage_logs(db: Session, limit: int = 100):
+async def get_usage_logs(db: Session, limit: int = 100):
     """Get usage logs from database"""
     try:
-        logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit).all()
+        logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit).all()
         return [
             {
                 'id': log.id,
                 'user_email': log.user_email,
                 'action': log.action,
-                'details': log.details,
-                'timestamp': log.timestamp.isoformat(),
+                'details': log.metadata_json or '',
+                'timestamp': log.created_at.isoformat(),
                 'ip_address': log.ip_address
             }
             for log in logs
@@ -75,7 +85,7 @@ def get_usage_logs(db: Session, limit: int = 100):
         print(f"Error getting usage logs: {e}")
         return []
 
-def get_report_statistics(db: Session):
+async def get_report_statistics(db: Session):
     """Get report generation statistics"""
     try:
         # Get Cert-IN reports
@@ -196,6 +206,8 @@ async def dashboard_home(request: Request):
                                 <thead>
                                     <tr>
                                         <th>Employee Name</th>
+                                        <th>Client Name</th>
+                                        <th>Project</th>
                                         <th>Total Vulnerabilities</th>
                                         <th>Critical</th>
                                         <th>High</th>
@@ -420,6 +432,8 @@ async def dashboard_home(request: Request):
                     const row = document.createElement('tr');
                     row.innerHTML = `
                         <td>${emp.name}</td>
+                        <td>${emp.client_name || 'Unknown'}</td>
+                        <td>${emp.project_name || 'Unknown'}</td>
                         <td>${emp.total_vulnerabilities}</td>
                         <td class="severity-critical">${emp.critical}</td>
                         <td class="severity-high">${emp.high}</td>
@@ -648,19 +662,19 @@ async def analyze_employees(request: Request):
         raise HTTPException(status_code=500, detail=f"Error analyzing employees: {str(e)}")
 
 @dashboard_app.get("/usage-logs/")
-async def get_usage_logs(db: Session = Depends(get_db)):
+async def get_usage_logs_endpoint(db: Session = Depends(get_db)):
     """Get usage logs from database"""
     try:
-        logs = get_usage_logs(db)
+        logs = await get_usage_logs(db)
         return JSONResponse(content=logs)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting usage logs: {str(e)}")
 
 @dashboard_app.get("/report-stats/")
-async def get_report_statistics(db: Session = Depends(get_db)):
+async def get_report_statistics_endpoint(db: Session = Depends(get_db)):
     """Get report generation statistics"""
     try:
-        stats = get_report_statistics(db)
+        stats = await get_report_statistics(db)
         return JSONResponse(content=stats)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting report stats: {str(e)}")

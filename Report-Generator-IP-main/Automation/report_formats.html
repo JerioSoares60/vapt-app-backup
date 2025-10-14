@@ -101,6 +101,9 @@
             <h1 style="margin:0;color:#8a2be2;">Report Generator</h1>
             <div style="display:flex;align-items:center;gap:10px;">
                 <a href="/report_formats.html" class="nav-btn">Home</a>
+                <button onclick="openEmployeeDashboard()" style="background-color: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block;">
+                    📊 Employee Dashboard
+                </button>
                 <a id="navDashboard" href="/dashboard" class="nav-btn" style="display:none">Dashboard</a>
                 <a href="/logout" class="logout-btn">Logout</a>
             </div>
@@ -146,10 +149,7 @@
         <div class="report-section">
             <h2 style="display: flex; align-items: center; justify-content: space-between;">
                 Cert-IN Report (Web)
-                <div style="display: flex; gap: 10px;">
-                    <button onclick="openCertINGenerator()" style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer;">Generate Report</button>
-                    <button onclick="openEmployeeDashboard()" style="background-color: #28a745; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer;">📊 Employee Dashboard</button>
-                </div>
+                <button onclick="openCertINGenerator()" style="background-color: #6923d0; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer;">Generate Report</button>
             </h2>
             <ul>
                 <li>Format as per Cert-IN guidelines for web applications</li>
