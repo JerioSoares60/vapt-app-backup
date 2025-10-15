@@ -63,17 +63,18 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             "/csrf-token",
             "/csrf-refresh",
             "/type3/",
-            "/type2/"
+            "/type2/",
+            "/dashboard/"  # allow dashboard and API under it without session/CSRF
         ]
         return any(request.url.path.startswith(path) for path in skip_paths)
     
     def _is_protected_endpoint(self, request: Request) -> bool:
         """Check if endpoint requires authentication"""
         protected_paths = [
-            "/dashboard",
             "/type1/",
             # '/type2/' intentionally not protected to avoid breaking generator
             # '/type3/' intentionally not protected to allow generator without login
+            # '/dashboard/' intentionally not protected for public dashboard access
             "/me"
         ]
         return any(request.url.path.startswith(path) for path in protected_paths)
