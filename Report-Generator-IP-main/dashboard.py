@@ -14,9 +14,30 @@ import json
 dashboard_app = FastAPI(title="Complete Dashboard & Analytics", version="1.0.0")
 
 def extract_comprehensive_data_from_excel(file_path):
-    """Extract comprehensive employee and project data from Excel"""
+    """Extract comprehensive employee and project data from Excel.
+    - Column detection is case-insensitive and tolerant to minor naming differences
+    - Supports either a single Severity column OR per-row count columns
+      (Critical/High/Medium/Low/Informational/Total)
+    """
     try:
         df = pd.read_excel(file_path)
+
+        # Build a normalized column name index for flexible lookups
+        def _normalize(name: str) -> str:
+            return ''.join(ch.lower() for ch in str(name).strip() if ch.isalnum())
+
+        normalized_to_real = { _normalize(col): col for col in df.columns }
+
+        def find_col(candidates):
+            for cand in candidates:
+                key = _normalize(cand)
+                if key in normalized_to_real:
+                    return normalized_to_real[key]
+            # Fall back to fuzzy: try startswith for partials
+            for real in df.columns:
+                if any(_normalize(real).startswith(_normalize(c)) for c in candidates):
+                    return real
+            return None
         data = {
             'employees': {},
             'projects': {},
@@ -34,7 +55,7 @@ def extract_comprehensive_data_from_excel(file_path):
         }
         
         # Employee columns to check (in order of preference)
-        employee_columns = ['Tester_Name', 'ReportedBy', 'Tester', 'Employee_Name', 'Name', 'Analyst']
+        employee_columns = ['Tester_Name', 'Tester Name', 'ReportedBy', 'Tester', 'Employee_Name', 'Employee Name', 'Name', 'Analyst']
         employee_col = None
         for col in employee_columns:
             if col in df.columns:
@@ -42,20 +63,20 @@ def extract_comprehensive_data_from_excel(file_path):
                 break
         
         # Project/Client/Asset columns to check
-        project_columns = ['Project', 'Project_Name', 'ProjectName', 'Assessment']
-        client_columns = ['Client_Name', 'ClientName', 'Client', 'Organization']
-        asset_columns = ['Asset/Hostname', 'Asset_Hostname', 'Hostname', 'Asset', 'URL', 'IP_Address', 'Target']
-        purpose_columns = ['Instant Purpose', 'Purpose', 'Asset_Purpose', 'Application_Type']
-        status_columns = ['VAPT Status', 'Status', 'VAPT_Status', 'Assessment_Status']
-        severity_columns = ['Severity', 'Risk', 'Risk_Level', 'Priority']
-        date_columns = ['Date', 'Created_Date', 'Reported_Date', 'Assessment_Date']
+        project_columns = ['Project', 'Project_Name', 'Project Name', 'ProjectName', 'Assessment']
+        client_columns = ['Client_Name', 'Client Name', 'ClientName', 'Client', 'Organization']
+        asset_columns = ['Asset/Hostname', 'Asset Hostname', 'Asset_Hostname', 'Hostname', 'Asset', 'URL', 'IP', 'IP_Address', 'Target']
+        purpose_columns = ['Instant purpose', 'Instant Purpose', 'Purpose', 'Asset_Purpose', 'Application_Type']
+        status_columns = ['VAPT Status', 'VAPT_Status', 'Assessment_Status', 'Status']
+        severity_columns = ['Severity', 'Risk', 'Risk Level', 'Risk_Level', 'Priority']
+        date_columns = ['Date', 'Created_Date', 'Created Date', 'Reported_Date', 'Assessment_Date']
         
         # Vulnerability detail columns
-        title_columns = ['Vulnerability Title', 'Title', 'Vulnerability_Name', 'Observation_Title']
-        description_columns = ['Description', 'Vulnerability_Description', 'Detailed_Observation', 'Vulnerable_Point']
+        title_columns = ['Vulnerability Title', 'Title', 'Vulnerability_Name', 'Vulnerability Name', 'Observation_Title']
+        description_columns = ['Description', 'Vulnerability_Description', 'Vulnerability Description', 'Detailed_Observation', 'Vulnerable_Point']
         cve_columns = ['CVE/CWE', 'CVE', 'CWE', 'CVE_CWE']
-        cvss_columns = ['CVSS', 'CVSS_Score', 'CVSS_Vector']
-        affected_asset_columns = ['Affected Asset', 'Affected_Asset', 'Target_Asset', 'Asset_IP']
+        cvss_columns = ['CVSS', 'CVSS Score', 'CVSS_Score', 'CVSS_Vector']
+        affected_asset_columns = ['Affected Asset', 'Affected_Asset', 'Target_Asset', 'Asset_IP', 'Affected Asset ie. IP/URL/Application etc.']
         recommendation_columns = ['Recommendation', 'Remediation', 'Solution', 'Fix']
         reference_columns = ['Reference', 'References', 'Links', 'URL']
         
@@ -65,49 +86,21 @@ def extract_comprehensive_data_from_excel(file_path):
             step_cols = [f'Step{i}', f'Step {i}', f'PoC_Step{i}', f'Proof_of_Concept_Step{i}']
             step_columns.extend(step_cols)
         
-        project_col = None
-        client_col = None
-        asset_col = None
-        purpose_col = None
-        status_col = None
-        severity_col = None
-        date_col = None
-        
-        # Find column matches
-        for col in project_columns:
-            if col in df.columns:
-                project_col = col
-                break
-                
-        for col in client_columns:
-            if col in df.columns:
-                client_col = col
-                break
-                
-        for col in asset_columns:
-            if col in df.columns:
-                asset_col = col
-                break
-                
-        for col in purpose_columns:
-            if col in df.columns:
-                purpose_col = col
-                break
-                
-        for col in status_columns:
-            if col in df.columns:
-                status_col = col
-                break
-                
-        for col in severity_columns:
-            if col in df.columns:
-                severity_col = col
-                break
-                
-        for col in date_columns:
-            if col in df.columns:
-                date_col = col
-                break
+        project_col = find_col(project_columns)
+        client_col = find_col(client_columns)
+        asset_col = find_col(asset_columns)
+        purpose_col = find_col(purpose_columns)
+        status_col = find_col(status_columns)
+        severity_col = find_col(severity_columns)
+        date_col = find_col(date_columns)
+
+        # Optional per-row count columns (use when available)
+        count_col_critical = find_col(['Critical'])
+        count_col_high = find_col(['High'])
+        count_col_medium = find_col(['Medium'])
+        count_col_low = find_col(['Low'])
+        count_col_info = find_col(['Informational', 'Information', 'Info'])
+        count_col_total = find_col(['Total'])
         
         # Process each row
         for idx, row in df.iterrows():
@@ -198,21 +191,34 @@ def extract_comprehensive_data_from_excel(file_path):
                             'clients': set()
                         }
                     
-                    data['assets'][asset_name]['total_vulnerabilities'] += 1
-                    
-                    # Count severity for asset
-                    if severity_col:
-                        severity = str(row.get(severity_col, '')).strip().lower()
-                        if 'critical' in severity or '5' in severity:
-                            data['assets'][asset_name]['critical'] += 1
-                        elif 'high' in severity or '4' in severity:
-                            data['assets'][asset_name]['high'] += 1
-                        elif 'medium' in severity or '3' in severity:
-                            data['assets'][asset_name]['medium'] += 1
-                        elif 'low' in severity or '2' in severity:
-                            data['assets'][asset_name]['low'] += 1
-                        else:
-                            data['assets'][asset_name]['info'] += 1
+                    # Prefer explicit count columns if present; otherwise derive from single severity
+                    if all(col is not None for col in [count_col_critical, count_col_high, count_col_medium, count_col_low, count_col_info]):
+                        c = int(row.get(count_col_critical) or 0)
+                        h = int(row.get(count_col_high) or 0)
+                        m = int(row.get(count_col_medium) or 0)
+                        l = int(row.get(count_col_low) or 0)
+                        i = int(row.get(count_col_info) or 0)
+                        data['assets'][asset_name]['critical'] += c
+                        data['assets'][asset_name]['high'] += h
+                        data['assets'][asset_name]['medium'] += m
+                        data['assets'][asset_name]['low'] += l
+                        data['assets'][asset_name]['info'] += i
+                        total_here = c + h + m + l + i
+                        data['assets'][asset_name]['total_vulnerabilities'] += total_here
+                    else:
+                        data['assets'][asset_name]['total_vulnerabilities'] += 1
+                        if severity_col:
+                            severity = str(row.get(severity_col, '')).strip().lower()
+                            if 'critical' in severity or '5' in severity:
+                                data['assets'][asset_name]['critical'] += 1
+                            elif 'high' in severity or '4' in severity:
+                                data['assets'][asset_name]['high'] += 1
+                            elif 'medium' in severity or '3' in severity:
+                                data['assets'][asset_name]['medium'] += 1
+                            elif 'low' in severity or '2' in severity:
+                                data['assets'][asset_name]['low'] += 1
+                            else:
+                                data['assets'][asset_name]['info'] += 1
                     
                     # Track related entities
                     if employee_col and employee_name:
