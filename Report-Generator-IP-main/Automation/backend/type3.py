@@ -231,14 +231,14 @@ def generate_vulnerability_sections(vulnerabilities, poc_mapping):
     return vulnerability_sections
 
 def create_landscape_vulnerability_box(doc, vulnerability_section):
-    """Create a landscape-oriented vulnerability box similar to type2.py but in landscape mode"""
-    from docx.shared import Inches, Pt
+    """Create a landscape-oriented vulnerability box with header bands (no full red background)."""
+    from docx.shared import Inches, Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import parse_xml
-    from docx.oxml.ns import nsdecls, qn
+    from docx.oxml.ns import nsdecls
     
-    # Create a table for the vulnerability box
-    table = doc.add_table(rows=1, cols=1)
+    # Header row: Observation | Severity | Status, then a merged content row
+    table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
     
     # Get severity colors
@@ -252,37 +252,43 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     }
     colors = severity_colors.get(severity, severity_colors['Medium'])
     
-    # Header row with severity and status
-    header_cell = table.rows[0].cells[0]
-    header_para = header_cell.paragraphs[0]
-    header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Header observation (no background)
+    cell_obs = table.rows[0].cells[0]
+    p_obs = cell_obs.paragraphs[0]
+    p_obs.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r_obs = p_obs.add_run(f"Observation: #{vulnerability_section['observation_number']}")
+    r_obs.font.name = 'Altone Trial'
+    r_obs.font.size = Pt(12)
+    r_obs.font.bold = True
+
+    # Severity cell with background
+    cell_sev = table.rows[0].cells[1]
+    p_sev = cell_sev.paragraphs[0]
+    p_sev.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r_sev = p_sev.add_run(f"Severity: {severity}")
+    r_sev.font.name = 'Altone Trial'
+    r_sev.font.size = Pt(12)
+    r_sev.font.bold = True
+    r_sev.font.color.rgb = RGBColor(255, 255, 255) if colors['text'] == '#FFFFFF' else RGBColor(0, 0, 0)
+    cell_sev._element.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{colors["bg"]}"/>'))
+
+    # Status cell with yellow background
+    cell_status = table.rows[0].cells[2]
+    p_stat = cell_status.paragraphs[0]
+    p_stat.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    status_text = vulnerability_section.get('status', 'Open')
+    r_stat = p_stat.add_run(f"Status: {status_text}")
+    r_stat.font.name = 'Altone Trial'
+    r_stat.font.size = Pt(12)
+    r_stat.font.bold = True
+    cell_status._element.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="#FFD966"/>'))
     
-    # Add observation number
-    obs_run = header_para.add_run(f"Observation: #{vulnerability_section['observation_number']}")
-    obs_run.font.name = 'Altone Trial'
-    obs_run.font.size = Pt(14)
-    obs_run.font.bold = True
-    obs_run.font.color.rgb = RGBColor(0, 0, 0)
-    
-    # Add severity and status in colored boxes
-    severity_run = header_para.add_run(f" | Severity: {severity}")
-    severity_run.font.name = 'Altone Trial'
-    severity_run.font.size = Pt(14)
-    severity_run.font.bold = True
-    severity_run.font.color.rgb = RGBColor(255, 255, 255)
-    
-    status_run = header_para.add_run(f" | Status: {vulnerability_section.get('status', 'Open')}")
-    status_run.font.name = 'Altone Trial'
-    status_run.font.size = Pt(14)
-    status_run.font.bold = True
-    status_run.font.color.rgb = RGBColor(0, 0, 0)
-    
-    # Apply background color to header
-    shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{colors["bg"]}"/>')
-    header_cell._element.get_or_add_tcPr().append(shading_elm)
-    
-    # Add vulnerability details
-    details_para = header_cell.add_paragraph()
+    # Content row merged across 3 columns
+    content_row = table.add_row()
+    content_cell = content_row.cells[0]
+    content_cell.merge(content_row.cells[1])
+    content_cell.merge(content_row.cells[2])
+    details_para = content_cell.paragraphs[0]
     details_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     
     # CVE/CWE
@@ -322,7 +328,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     
     # Detailed Description
     if vulnerability_section.get('description'):
-        desc_para = header_cell.add_paragraph()
+        desc_para = content_cell.add_paragraph()
         desc_run = desc_para.add_run("Detailed Observation/Vulnerable Point:\n")
         desc_run.font.name = 'Altone Trial'
         desc_run.font.size = Pt(11)
@@ -335,7 +341,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     
     # Impact
     if vulnerability_section.get('impact'):
-        impact_para = header_cell.add_paragraph()
+        impact_para = content_cell.add_paragraph()
         impact_run = impact_para.add_run("Impact:\n")
         impact_run.font.name = 'Altone Trial'
         impact_run.font.size = Pt(11)
@@ -348,7 +354,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     
     # Recommendations
     if vulnerability_section.get('recommendations'):
-        rec_para = header_cell.add_paragraph()
+        rec_para = content_cell.add_paragraph()
         rec_run = rec_para.add_run("Recommendations:\n")
         rec_run.font.name = 'Altone Trial'
         rec_run.font.size = Pt(11)
@@ -362,14 +368,14 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     
     # Proof of Concept with images
     if vulnerability_section.get('has_poc') and vulnerability_section.get('poc_images'):
-        poc_para = header_cell.add_paragraph()
+        poc_para = content_cell.add_paragraph()
         poc_run = poc_para.add_run("Evidence/Proof of Concept:\n")
         poc_run.font.name = 'Altone Trial'
         poc_run.font.size = Pt(11)
         poc_run.font.bold = True
         
         for i, poc_img in enumerate(vulnerability_section['poc_images'], 1):
-            step_para = header_cell.add_paragraph()
+            step_para = content_cell.add_paragraph()
             step_run = step_para.add_run(f"Step {i}:\n")
             step_run.font.name = 'Altone Trial'
             step_run.font.size = Pt(11)
@@ -377,12 +383,12 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
             
             # Add the image
             if os.path.exists(poc_img['path']):
-                img_para = header_cell.add_paragraph()
+                img_para = content_cell.add_paragraph()
                 img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 img_run = img_para.add_run()
                 img_run.add_picture(poc_img['path'], width=Inches(4))
             else:
-                missing_para = header_cell.add_paragraph()
+                missing_para = content_cell.add_paragraph()
                 missing_run = missing_para.add_run(f"[Image missing: {poc_img['filename']}]")
                 missing_run.font.name = 'Altone Trial'
                 missing_run.font.size = Pt(10)
