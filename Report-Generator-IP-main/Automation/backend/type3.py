@@ -19,21 +19,18 @@ import io
 from sqlalchemy.orm import Session
 from db import get_db, AuditLog, CertINReport
 
-# Version tracking
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 app = FastAPI()
 
-# Add session middleware for session access
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "supersecret"),
-    https_only=False,  # Set to True for production with HTTPS
+    https_only=False,
     same_site="lax",
     session_cookie="reportgen_session"
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,23 +39,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Directory to store uploaded files
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def sanitize_filename(filename):
-    """Sanitize filename to prevent XSS and path traversal"""
     if not filename:
         return "upload.xlsx"
-    # Remove dangerous characters and keep only alphanumeric, dots, hyphens, underscores
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
     return safe_name
 
 def read_vulnerability_excel(file_path):
-    """Read vulnerability data from existing Excel file"""
     try:
         df = pd.read_excel(file_path)
-        # Convert to list of dictionaries for template
         vulnerabilities = []
         for _, row in df.iterrows():
             vuln_data = {}
@@ -70,62 +62,19 @@ def read_vulnerability_excel(file_path):
         print(f"Error reading vulnerability Excel: {e}")
         return []
 
-def extract_employee_data_from_excel(file_path):
-    """Extract employee data from Excel for dashboard tracking"""
-    try:
-        df = pd.read_excel(file_path)
-        employees = {}
-        
-        if 'Tester_Name' in df.columns:
-            for _, row in df.iterrows():
-                tester_name = str(row.get('Tester_Name', '')).strip()
-                if tester_name and tester_name != 'nan':
-                    if tester_name not in employees:
-                        employees[tester_name] = {
-                            'name': tester_name,
-                            'total_vulnerabilities': 0,
-                            'critical': 0,
-                            'high': 0,
-                            'medium': 0,
-                            'low': 0,
-                            'info': 0
-                        }
-                    
-                    employees[tester_name]['total_vulnerabilities'] += 1
-                    
-                    # Count by severity if available
-                    severity = str(row.get('Severity', '')).strip().lower()
-                    if 'critical' in severity:
-                        employees[tester_name]['critical'] += 1
-                    elif 'high' in severity:
-                        employees[tester_name]['high'] += 1
-                    elif 'medium' in severity:
-                        employees[tester_name]['medium'] += 1
-                    elif 'low' in severity:
-                        employees[tester_name]['low'] += 1
-                    else:
-                        employees[tester_name]['info'] += 1
-        
-        return list(employees.values())
-    except Exception as e:
-        print(f"Error extracting employee data: {e}")
-        return []
-
 async def process_poc_zip_files(poc_files, vulnerabilities):
-    """Process uploaded PoC zip files and map them to vulnerabilities"""
+    """Process uploaded PoC zip files and map them to vulnerabilities by observation number"""
     poc_mapping = {}
     
     for poc_file in poc_files:
         if not poc_file.filename:
             continue
             
-        # Save zip file temporarily
         temp_zip_path = os.path.join(UPLOAD_DIR, f"temp_{poc_file.filename}")
         content = await poc_file.read()
         with open(temp_zip_path, "wb") as f:
             f.write(content)
         
-        # Extract zip file to a common directory
         extract_dir = os.path.join(UPLOAD_DIR, "poc_images")
         os.makedirs(extract_dir, exist_ok=True)
         
@@ -133,53 +82,83 @@ async def process_poc_zip_files(poc_files, vulnerabilities):
             with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
             
-            # Get list of all extracted images
+            # Get all images and organize them
             all_images = []
             for root, dirs, files in os.walk(extract_dir):
                 for file in files:
-                    if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                    if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+                        full_path = os.path.join(root, file)
+                        # Extract observation number and step number from filename
+                        obs_num, step_num = extract_observation_and_step(file)
                         all_images.append({
                             'filename': file,
-                            'path': os.path.join(root, file),
-                            'step_number': extract_step_number(file)
+                            'path': full_path,
+                            'observation_number': obs_num,
+                            'step_number': step_num
                         })
             
-            # Sort by step number
-            all_images.sort(key=lambda x: x['step_number'])
+            # Sort by observation number and step number
+            all_images.sort(key=lambda x: (x['observation_number'], x['step_number']))
             
-            # Map images to vulnerabilities based on observation number
-            for i, vuln in enumerate(vulnerabilities, 1):
-                # Find images that correspond to this observation
-                vuln_images = []
-                for img in all_images:
-                    # Check if image filename contains step number that matches this observation
-                    step_num = extract_step_number(img['filename'])
-                    if step_num == i or f"step{step_num}" in img['filename'].lower():
-                        vuln_images.append(img)
-                
-                if vuln_images:
-                    poc_mapping[f"OBS-{i:03d}"] = vuln_images
+            # Group images by observation
+            for img in all_images:
+                obs_key = f"OBS-{img['observation_number']:03d}"
+                if obs_key not in poc_mapping:
+                    poc_mapping[obs_key] = []
+                poc_mapping[obs_key].append(img)
             
         except Exception as e:
             print(f"Error extracting PoC zip: {e}")
-        
-        # Clean up temp zip
-        os.remove(temp_zip_path)
+        finally:
+            if os.path.exists(temp_zip_path):
+                os.remove(temp_zip_path)
     
     return poc_mapping
 
-def extract_step_number(filename):
-    """Extract step number from filename (e.g., step1.png -> 1)"""
-    import re
-    match = re.search(r'step(\d+)', filename.lower())
-    return int(match.group(1)) if match else 999
+def extract_observation_and_step(filename):
+    """
+    Extract observation number and step number from filename.
+    Supports formats like:
+    - obs1_step1.png, obs1_step2.png
+    - observation1_step1.png
+    - 1_1.png (obs_step)
+    - step1_obs1.png
+    Falls back to sequential numbering if pattern not found
+    """
+    filename_lower = filename.lower()
+    
+    # Try pattern: obs1_step1 or observation1_step1
+    match = re.search(r'obs(?:ervation)?(\d+)[_\-]step(\d+)', filename_lower)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    # Try pattern: step1_obs1
+    match = re.search(r'step(\d+)[_\-]obs(?:ervation)?(\d+)', filename_lower)
+    if match:
+        return int(match.group(2)), int(match.group(1))
+    
+    # Try pattern: 1_1 (assuming obs_step)
+    match = re.search(r'(\d+)[_\-](\d+)', filename_lower)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    
+    # Try just step number (assume observation 1)
+    match = re.search(r'step(\d+)', filename_lower)
+    if match:
+        return 1, int(match.group(1))
+    
+    # Default: extract any number as step, assume observation 1
+    match = re.search(r'(\d+)', filename_lower)
+    if match:
+        return 1, int(match.group(1))
+    
+    return 1, 999
 
 def generate_vulnerability_sections(vulnerabilities, poc_mapping):
     """Generate vulnerability sections for the report"""
     vulnerability_sections = []
     
     for i, vuln in enumerate(vulnerabilities, 1):
-        # Extract data from Excel columns (case-insensitive matching)
         vuln_id = vuln.get('Vulnerability_ID', f'OBS-{i:03d}')
         severity = vuln.get('Severity', 'Medium')
         status = vuln.get('Status', 'Open')
@@ -200,10 +179,8 @@ def generate_vulnerability_sections(vulnerabilities, poc_mapping):
         # Generate recommendations list
         recommendations_list = []
         if recommendations:
-            # Split by newlines or numbers and clean up
             rec_lines = [line.strip() for line in recommendations.split('\n') if line.strip()]
             for line in rec_lines:
-                # Remove numbering if present
                 clean_line = re.sub(r'^\d+\.\s*', '', line)
                 if clean_line:
                     recommendations_list.append(clean_line)
@@ -231,46 +208,55 @@ def generate_vulnerability_sections(vulnerabilities, poc_mapping):
     return vulnerability_sections
 
 def create_landscape_vulnerability_box(doc, vulnerability_section):
-    """Create a landscape-oriented vulnerability box with header bands (no full red background)."""
+    """Create a properly formatted vulnerability box matching the expected layout"""
     from docx.shared import Inches, Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import parse_xml
     from docx.oxml.ns import nsdecls
     
-    # Header row: Observation | Severity | Status, then a merged content row
-    table = doc.add_table(rows=1, cols=3)
+    # Create table with 3 columns for header
+    table = doc.add_table(rows=2, cols=3)
     table.style = 'Table Grid'
+    table.autofit = False
+    table.allow_autofit = False
+    
+    # Set column widths for better layout
+    for row in table.rows:
+        row.cells[0].width = Inches(2.5)
+        row.cells[1].width = Inches(2.0)
+        row.cells[2].width = Inches(2.0)
     
     # Get severity colors
     severity = vulnerability_section.get('severity', 'Medium')
     severity_colors = {
-        'Critical': {'bg': '#990000', 'text': '#FFFFFF'},
-        'High': {'bg': '#FF0000', 'text': '#FFFFFF'},
-        'Medium': {'bg': '#FFCC00', 'text': '#000000'},
-        'Low': {'bg': '#009933', 'text': '#FFFFFF'},
-        'Informational': {'bg': '#3399CC', 'text': '#FFFFFF'}
+        'Critical': {'bg': '990000', 'text': 'FFFFFF'},
+        'High': {'bg': 'FF0000', 'text': 'FFFFFF'},
+        'Medium': {'bg': 'FFCC00', 'text': '000000'},
+        'Low': {'bg': '009933', 'text': 'FFFFFF'},
+        'Informational': {'bg': '3399CC', 'text': 'FFFFFF'}
     }
     colors = severity_colors.get(severity, severity_colors['Medium'])
     
-    # Header observation (no background)
+    # Row 1: Observation | Severity | Status
     cell_obs = table.rows[0].cells[0]
     p_obs = cell_obs.paragraphs[0]
     p_obs.alignment = WD_ALIGN_PARAGRAPH.LEFT
     r_obs = p_obs.add_run(f"Observation: #{vulnerability_section['observation_number']}")
-    r_obs.font.name = 'Altone Trial'
-    r_obs.font.size = Pt(12)
+    r_obs.font.name = 'Calibri'
+    r_obs.font.size = Pt(11)
     r_obs.font.bold = True
 
-    # Severity cell with background
+    # Severity cell with colored background
     cell_sev = table.rows[0].cells[1]
     p_sev = cell_sev.paragraphs[0]
     p_sev.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r_sev = p_sev.add_run(f"Severity: {severity}")
-    r_sev.font.name = 'Altone Trial'
-    r_sev.font.size = Pt(12)
+    r_sev.font.name = 'Calibri'
+    r_sev.font.size = Pt(11)
     r_sev.font.bold = True
-    r_sev.font.color.rgb = RGBColor(255, 255, 255) if colors['text'] == '#FFFFFF' else RGBColor(0, 0, 0)
-    cell_sev._element.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{colors["bg"]}"/>'))
+    r_sev.font.color.rgb = RGBColor(255, 255, 255) if colors['text'] == 'FFFFFF' else RGBColor(0, 0, 0)
+    shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{colors["bg"]}"/>')
+    cell_sev._element.get_or_add_tcPr().append(shading)
 
     # Status cell with yellow background
     cell_status = table.rows[0].cells[2]
@@ -278,107 +264,142 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     p_stat.alignment = WD_ALIGN_PARAGRAPH.CENTER
     status_text = vulnerability_section.get('status', 'Open')
     r_stat = p_stat.add_run(f"Status: {status_text}")
-    r_stat.font.name = 'Altone Trial'
-    r_stat.font.size = Pt(12)
+    r_stat.font.name = 'Calibri'
+    r_stat.font.size = Pt(11)
     r_stat.font.bold = True
-    cell_status._element.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="#FFD966"/>'))
+    shading_status = parse_xml(f'<w:shd {nsdecls("w")} w:fill="FFD966"/>')
+    cell_status._element.get_or_add_tcPr().append(shading_status)
     
-    # Content row merged across 3 columns
+    # Row 2: CVSS info merged across all columns
+    cvss_cell = table.rows[1].cells[0]
+    cvss_cell.merge(table.rows[1].cells[1])
+    cvss_cell.merge(table.rows[1].cells[2])
+    cvss_para = cvss_cell.paragraphs[0]
+    cvss_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    
+    # Add CVSS: X.X
+    if vulnerability_section.get('cvss'):
+        cvss_run = cvss_para.add_run(f"CVSS: {vulnerability_section['cvss']}")
+        cvss_run.font.name = 'Calibri'
+        cvss_run.font.size = Pt(10)
+        cvss_run.font.bold = True
+    
+    # Add a new row for detailed content
     content_row = table.add_row()
     content_cell = content_row.cells[0]
     content_cell.merge(content_row.cells[1])
     content_cell.merge(content_row.cells[2])
-    details_para = content_cell.paragraphs[0]
-    details_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     
-    # CVE/CWE
-    if vulnerability_section.get('cve_cwe'):
-        cve_run = details_para.add_run(f"CVE/CWE: {vulnerability_section['cve_cwe']}\n")
-        cve_run.font.name = 'Altone Trial'
-        cve_run.font.size = Pt(11)
-        cve_run.font.bold = True
+    # Clear default paragraph and start fresh
+    for p in content_cell.paragraphs:
+        p.clear()
     
-    # CVSS
-    if vulnerability_section.get('cvss'):
-        cvss_run = details_para.add_run(f"CVSS: {vulnerability_section['cvss']}\n")
-        cvss_run.font.name = 'Altone Trial'
-        cvss_run.font.size = Pt(11)
-        cvss_run.font.bold = True
+    # Name of Report/Observation/Security Issue
+    if vulnerability_section.get('title'):
+        title_para = content_cell.add_paragraph()
+        title_run = title_para.add_run(f"Name of Report/Observation/Security Issue:\n")
+        title_run.font.name = 'Calibri'
+        title_run.font.size = Pt(10)
+        title_run.font.bold = True
+        
+        title_text = title_para.add_run(vulnerability_section['title'])
+        title_text.font.name = 'Calibri'
+        title_text.font.size = Pt(10)
+        title_para.add_run("\n")
     
     # CVSS Vector
     if vulnerability_section.get('cvss_vector'):
-        vector_run = details_para.add_run(f"CVSS Vector: {vulnerability_section['cvss_vector']}\n")
-        vector_run.font.name = 'Altone Trial'
-        vector_run.font.size = Pt(11)
+        vector_para = content_cell.add_paragraph()
+        vector_run = vector_para.add_run("CVSS Vector: ")
+        vector_run.font.name = 'Calibri'
+        vector_run.font.size = Pt(10)
         vector_run.font.bold = True
+        
+        vector_text = vector_para.add_run(vulnerability_section['cvss_vector'])
+        vector_text.font.name = 'Calibri'
+        vector_text.font.size = Pt(10)
+        vector_para.add_run("\n")
     
-    # Affected Asset
+    # Observation/Vulnerability type
+    if vulnerability_section.get('cve_cwe'):
+        cve_para = content_cell.add_paragraph()
+        cve_run = cve_para.add_run("Observation/Vulnerability type: ")
+        cve_run.font.name = 'Calibri'
+        cve_run.font.size = Pt(10)
+        cve_run.font.bold = True
+        
+        cve_text = cve_para.add_run(vulnerability_section['cve_cwe'])
+        cve_text.font.name = 'Calibri'
+        cve_text.font.size = Pt(10)
+        cve_para.add_run("\n")
+    
+    # Observation Availability Info
     if vulnerability_section.get('affected_asset'):
-        asset_run = details_para.add_run(f"Affected Asset: {vulnerability_section['affected_asset']}\n")
-        asset_run.font.name = 'Altone Trial'
-        asset_run.font.size = Pt(11)
+        asset_para = content_cell.add_paragraph()
+        asset_run = asset_para.add_run("Observation Availability Info: ")
+        asset_run.font.name = 'Calibri'
+        asset_run.font.size = Pt(10)
         asset_run.font.bold = True
+        
+        asset_text = asset_para.add_run(vulnerability_section['affected_asset'])
+        asset_text.font.name = 'Calibri'
+        asset_text.font.size = Pt(10)
+        asset_para.add_run("\n")
     
-    # Vulnerability Title
-    if vulnerability_section.get('title'):
-        title_run = details_para.add_run(f"Vulnerability Title: {vulnerability_section['title']}\n")
-        title_run.font.name = 'Altone Trial'
-        title_run.font.size = Pt(11)
-        title_run.font.bold = True
-    
-    # Detailed Description
+    # Detailed Observation/Vulnerable Point
     if vulnerability_section.get('description'):
         desc_para = content_cell.add_paragraph()
         desc_run = desc_para.add_run("Detailed Observation/Vulnerable Point:\n")
-        desc_run.font.name = 'Altone Trial'
-        desc_run.font.size = Pt(11)
+        desc_run.font.name = 'Calibri'
+        desc_run.font.size = Pt(10)
         desc_run.font.bold = True
         
-        desc_text_run = desc_para.add_run(vulnerability_section['description'])
-        desc_text_run.font.name = 'Altone Trial'
-        desc_text_run.font.size = Pt(11)
-        desc_text_run.font.bold = False
-    
-    # Impact
-    if vulnerability_section.get('impact'):
-        impact_para = content_cell.add_paragraph()
-        impact_run = impact_para.add_run("Impact:\n")
-        impact_run.font.name = 'Altone Trial'
-        impact_run.font.size = Pt(11)
-        impact_run.font.bold = True
-        
-        impact_text_run = impact_para.add_run(vulnerability_section['impact'])
-        impact_text_run.font.name = 'Altone Trial'
-        impact_text_run.font.size = Pt(11)
-        impact_text_run.font.bold = False
+        desc_text = desc_para.add_run(vulnerability_section['description'])
+        desc_text.font.name = 'Calibri'
+        desc_text.font.size = Pt(10)
+        desc_para.add_run("\n")
     
     # Recommendations
     if vulnerability_section.get('recommendations'):
         rec_para = content_cell.add_paragraph()
         rec_run = rec_para.add_run("Recommendations:\n")
-        rec_run.font.name = 'Altone Trial'
-        rec_run.font.size = Pt(11)
+        rec_run.font.name = 'Calibri'
+        rec_run.font.size = Pt(10)
         rec_run.font.bold = True
         
         for i, rec in enumerate(vulnerability_section['recommendations'], 1):
-            rec_text_run = rec_para.add_run(f"{i}. {rec}\n")
-            rec_text_run.font.name = 'Altone Trial'
-            rec_text_run.font.size = Pt(11)
-            rec_text_run.font.bold = False
+            rec_text = rec_para.add_run(f"{i}. {rec}\n")
+            rec_text.font.name = 'Calibri'
+            rec_text.font.size = Pt(10)
+        rec_para.add_run("\n")
     
-    # Proof of Concept with images
+    # Reference (if available)
+    reference = vulnerability_section.get('reference', '')
+    if reference:
+        ref_para = content_cell.add_paragraph()
+        ref_run = ref_para.add_run("Reference:\n")
+        ref_run.font.name = 'Calibri'
+        ref_run.font.size = Pt(10)
+        ref_run.font.bold = True
+        
+        ref_text = ref_para.add_run(reference)
+        ref_text.font.name = 'Calibri'
+        ref_text.font.size = Pt(10)
+        ref_para.add_run("\n")
+    
+    # Evidence/Proof of Concept
     if vulnerability_section.get('has_poc') and vulnerability_section.get('poc_images'):
         poc_para = content_cell.add_paragraph()
         poc_run = poc_para.add_run("Evidence/Proof of Concept:\n")
-        poc_run.font.name = 'Altone Trial'
-        poc_run.font.size = Pt(11)
+        poc_run.font.name = 'Calibri'
+        poc_run.font.size = Pt(10)
         poc_run.font.bold = True
         
-        for i, poc_img in enumerate(vulnerability_section['poc_images'], 1):
+        for step_idx, poc_img in enumerate(vulnerability_section['poc_images'], 1):
             step_para = content_cell.add_paragraph()
-            step_run = step_para.add_run(f"Step {i}:\n")
-            step_run.font.name = 'Altone Trial'
-            step_run.font.size = Pt(11)
+            step_run = step_para.add_run(f"Step {step_idx}:\n")
+            step_run.font.name = 'Calibri'
+            step_run.font.size = Pt(10)
             step_run.font.bold = True
             
             # Add the image
@@ -386,12 +407,19 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
                 img_para = content_cell.add_paragraph()
                 img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 img_run = img_para.add_run()
-                img_run.add_picture(poc_img['path'], width=Inches(4))
+                try:
+                    img_run.add_picture(poc_img['path'], width=Inches(5.5))
+                except Exception as e:
+                    print(f"Error adding image {poc_img['filename']}: {e}")
+                    missing_run = img_para.add_run(f"[Image error: {poc_img['filename']}]")
+                    missing_run.font.name = 'Calibri'
+                    missing_run.font.size = Pt(9)
+                    missing_run.font.italic = True
             else:
                 missing_para = content_cell.add_paragraph()
                 missing_run = missing_para.add_run(f"[Image missing: {poc_img['filename']}]")
-                missing_run.font.name = 'Altone Trial'
-                missing_run.font.size = Pt(10)
+                missing_run.font.name = 'Calibri'
+                missing_run.font.size = Pt(9)
                 missing_run.font.italic = True
     
     return table
@@ -399,12 +427,9 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
 def generate_certin_report_from_form(data, template_path, output_path, vulnerability_data=None, poc_mapping=None):
     """Generate Cert-IN report from form data and template"""
     try:
-        # Sanitize Jinja placeholders inside the template to avoid invalid tokens
         safe_template_path = _sanitize_docx_jinja_placeholders(template_path)
-        # Load the sanitized template
         doc = DocxTemplate(safe_template_path)
         
-        # Parse JSON fields
         document_change_history = json.loads(data.get('document_change_history', '[]'))
         distribution_list = json.loads(data.get('distribution_list', '[]'))
         engagement_scope = json.loads(data.get('engagement_scope', '[]'))
@@ -412,22 +437,17 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         audit_activities = json.loads(data.get('audit_activities', '[]'))
         tools_software = json.loads(data.get('tools_software', '[]'))
         
-        # Process vulnerability data if provided
         vulnerability_sections = []
         if vulnerability_data and poc_mapping:
             vulnerability_sections = generate_vulnerability_sections(vulnerability_data, poc_mapping)
         
-        # Prepare context for template
         context = {
-            # Basic Report Information
             'CLIENT_NAME': data.get('client_name', ''),
             'REPORT_NAME': data.get('report_name', ''),
             'REPORT_RELEASE_DATE': data.get('report_release_date', ''),
             'TYPE_OF_AUDIT': data.get('type_of_audit', ''),
             'TYPE_OF_AUDIT_REPORT': data.get('type_of_audit_report', ''),
             'PERIOD': data.get('period', ''),
-            
-            # Document Control
             'DOCUMENT_TITLE': data.get('document_title', ''),
             'DOCUMENT_ID': data.get('document_id', ''),
             'DOCUMENT_VERSION': data.get('document_version', ''),
@@ -436,72 +456,46 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
             'APPROVED_BY': data.get('approved_by', ''),
             'RELEASED_BY': data.get('released_by', ''),
             'RELEASE_DATE': data.get('release_date', ''),
-            
-            # Document Change History
             'DOCUMENT_CHANGE_HISTORY': document_change_history,
-            
-            # Distribution List
             'DISTRIBUTION_LIST': distribution_list,
-            
-            # Engagement Scope
             'ENGAGEMENT_SCOPE': engagement_scope,
-            
-            # Auditing Team
             'AUDITING_TEAM': auditing_team,
-            
-            # Audit Activities
             'AUDIT_ACTIVITIES': audit_activities,
-            
-            # Tools/Software
             'TOOLS_SOFTWARE': tools_software,
-            
-            # Vulnerability Data
             'VULNERABILITIES': vulnerability_sections,
             'HAS_VULNERABILITIES': len(vulnerability_sections) > 0,
             'VULNERABILITY_COUNT': len(vulnerability_sections),
-            
-            # Additional fields
             'GENERATION_DATE': datetime.now().strftime('%d %B %Y'),
             'GENERATION_TIME': datetime.now().strftime('%H:%M:%S'),
         }
         
-        # Render the template
         doc.render(context)
         
-        # Save the document temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             doc.save(tmp.name)
             tmp_path = tmp.name
         
-        # Open with python-docx for dynamic vulnerability boxes
         from docx import Document
         doc = Document(tmp_path)
         
-        # Add vulnerability sections if they exist
         if vulnerability_sections:
-            # Add a page break before vulnerabilities
             doc.add_page_break()
             
-            # Add heading for vulnerabilities
             vuln_heading = doc.add_paragraph()
+            vuln_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
             vuln_run = vuln_heading.add_run("Detailed Observations")
-            vuln_run.font.name = 'Altone Trial'
+            vuln_run.font.name = 'Calibri'
             vuln_run.font.size = Pt(18)
             vuln_run.font.bold = True
             vuln_run.font.color.rgb = RGBColor(106, 68, 154)
             
-            # Add each vulnerability box
             for i, vuln_section in enumerate(vulnerability_sections):
                 create_landscape_vulnerability_box(doc, vuln_section)
                 
-                # Add page break between vulnerabilities (except for the last one)
                 if i < len(vulnerability_sections) - 1:
                     doc.add_page_break()
         
-        # Save the final document
         doc.save(output_path)
-        
-        # Clean up temp file
         os.remove(tmp_path)
         
         return True
@@ -512,11 +506,6 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
 
 def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
-    """Create a sanitized copy of the DOCX where Jinja placeholders are normalized.
-    - Only sanitizes {{ ... }} print statements, preserving {% ... %} control flow syntax
-    - Replaces non-alphanumeric/underscore/dot characters in print statements with underscores
-    Returns path to a temp DOCX file.
-    """
     try:
         with open(template_path, 'rb') as f:
             original_bytes = f.read()
@@ -524,15 +513,10 @@ def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
         out_buf = io.BytesIO()
         zout = zipfile.ZipFile(out_buf, 'w', zipfile.ZIP_DEFLATED)
         
-        # Only sanitize print statements {{ ... }}, leave control flow {% ... %} untouched
         pattern_expr = re.compile(r"(\{\{\s*)([^}]+?)(\s*\}\})")
         
         def _normalize_print_statement(inner: str) -> str:
-            # Keep dots for attribute access, replace other non word chars with underscores
-            # Special handling for common template patterns
             inner = inner.strip()
-            
-            # Fix common template mismatches
             if inner == "Audit.sr_no":
                 inner = "team.sr_no"
             
@@ -550,20 +534,20 @@ def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
             data = zin.read(item.filename)
             if item.filename.startswith('word/') and item.filename.endswith('.xml'):
                 xml = data.decode('utf-8', errors='ignore')
-                # Only sanitize print statements, preserve control flow syntax
                 xml = pattern_expr.sub(lambda m: m.group(1) + _normalize_print_statement(m.group(2)) + m.group(3), xml)
                 data = xml.encode('utf-8')
             zout.writestr(item, data)
         zin.close()
         zout.close()
-        # Write temp file
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmpf:
             tmpf.write(out_buf.getvalue())
             return tmpf.name
     except Exception:
-        # Fallback to original if anything fails
         return template_path
 
+# REST OF THE CODE REMAINS THE SAME (HTML form, routes, etc.)
+# ... [Include all the remaining routes from original code]
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Serve the Cert-IN form interface"""
