@@ -21,12 +21,14 @@ def extract_comprehensive_data_from_excel(file_path):
             'employees': {},
             'projects': {},
             'clients': {},
+            'assets': {},
             'vulnerabilities': [],
             'summary': {
                 'total_vulnerabilities': len(df),
                 'total_employees': 0,
                 'total_projects': 0,
                 'total_clients': 0,
+                'total_assets': 0,
                 'severity_breakdown': {'Critical': 0, 'High': 0, 'Medium': 0, 'Low': 0, 'Info': 0}
             }
         }
@@ -39,17 +41,39 @@ def extract_comprehensive_data_from_excel(file_path):
                 employee_col = col
                 break
         
-        # Project/Client columns to check
+        # Project/Client/Asset columns to check
         project_columns = ['Project', 'Project_Name', 'ProjectName', 'Assessment']
         client_columns = ['Client_Name', 'ClientName', 'Client', 'Organization']
+        asset_columns = ['Asset/Hostname', 'Asset_Hostname', 'Hostname', 'Asset', 'URL', 'IP_Address', 'Target']
+        purpose_columns = ['Instant Purpose', 'Purpose', 'Asset_Purpose', 'Application_Type']
+        status_columns = ['VAPT Status', 'Status', 'VAPT_Status', 'Assessment_Status']
         severity_columns = ['Severity', 'Risk', 'Risk_Level', 'Priority']
         date_columns = ['Date', 'Created_Date', 'Reported_Date', 'Assessment_Date']
         
+        # Vulnerability detail columns
+        title_columns = ['Vulnerability Title', 'Title', 'Vulnerability_Name', 'Observation_Title']
+        description_columns = ['Description', 'Vulnerability_Description', 'Detailed_Observation', 'Vulnerable_Point']
+        cve_columns = ['CVE/CWE', 'CVE', 'CWE', 'CVE_CWE']
+        cvss_columns = ['CVSS', 'CVSS_Score', 'CVSS_Vector']
+        affected_asset_columns = ['Affected Asset', 'Affected_Asset', 'Target_Asset', 'Asset_IP']
+        recommendation_columns = ['Recommendation', 'Remediation', 'Solution', 'Fix']
+        reference_columns = ['Reference', 'References', 'Links', 'URL']
+        
+        # Step columns (look for Step1, Step2, etc.)
+        step_columns = []
+        for i in range(1, 10):  # Check for up to 9 steps
+            step_cols = [f'Step{i}', f'Step {i}', f'PoC_Step{i}', f'Proof_of_Concept_Step{i}']
+            step_columns.extend(step_cols)
+        
         project_col = None
         client_col = None
+        asset_col = None
+        purpose_col = None
+        status_col = None
         severity_col = None
         date_col = None
         
+        # Find column matches
         for col in project_columns:
             if col in df.columns:
                 project_col = col
@@ -58,6 +82,21 @@ def extract_comprehensive_data_from_excel(file_path):
         for col in client_columns:
             if col in df.columns:
                 client_col = col
+                break
+                
+        for col in asset_columns:
+            if col in df.columns:
+                asset_col = col
+                break
+                
+        for col in purpose_columns:
+            if col in df.columns:
+                purpose_col = col
+                break
+                
+        for col in status_columns:
+            if col in df.columns:
+                status_col = col
                 break
                 
         for col in severity_columns:
@@ -143,6 +182,46 @@ def extract_comprehensive_data_from_excel(file_path):
                         if client_name and client_name != 'nan':
                             data['projects'][project_name]['clients'].add(client_name)
             
+            # Asset data
+            if asset_col:
+                asset_name = str(row.get(asset_col, '')).strip()
+                if asset_name and asset_name != 'nan':
+                    if asset_name not in data['assets']:
+                        data['assets'][asset_name] = {
+                            'name': asset_name,
+                            'purpose': str(row.get(purpose_col, '')).strip() if purpose_col else 'Unknown',
+                            'status': str(row.get(status_col, '')).strip() if status_col else 'Unknown',
+                            'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0,
+                            'total_vulnerabilities': 0,
+                            'employees': set(),
+                            'projects': set(),
+                            'clients': set()
+                        }
+                    
+                    data['assets'][asset_name]['total_vulnerabilities'] += 1
+                    
+                    # Count severity for asset
+                    if severity_col:
+                        severity = str(row.get(severity_col, '')).strip().lower()
+                        if 'critical' in severity or '5' in severity:
+                            data['assets'][asset_name]['critical'] += 1
+                        elif 'high' in severity or '4' in severity:
+                            data['assets'][asset_name]['high'] += 1
+                        elif 'medium' in severity or '3' in severity:
+                            data['assets'][asset_name]['medium'] += 1
+                        elif 'low' in severity or '2' in severity:
+                            data['assets'][asset_name]['low'] += 1
+                        else:
+                            data['assets'][asset_name]['info'] += 1
+                    
+                    # Track related entities
+                    if employee_col and employee_name:
+                        data['assets'][asset_name]['employees'].add(employee_name)
+                    if project_col and project_name:
+                        data['assets'][asset_name]['projects'].add(project_name)
+                    if client_col and client_name:
+                        data['assets'][asset_name]['clients'].add(client_name)
+            
             # Client data
             if client_col:
                 client_name = str(row.get(client_col, '')).strip()
@@ -164,6 +243,73 @@ def extract_comprehensive_data_from_excel(file_path):
                     
                     if employee_col and employee_name:
                         data['clients'][client_name]['employees'].add(employee_name)
+            
+            # Extract vulnerability details for each row
+            vuln_detail = {
+                'observation_number': idx + 1,
+                'severity': str(row.get(severity_col, '')).strip() if severity_col else 'Unknown',
+                'status': str(row.get(status_col, '')).strip() if status_col else 'Open',
+                'title': '',
+                'description': '',
+                'cve_cwe': '',
+                'cvss': '',
+                'affected_asset': '',
+                'recommendation': '',
+                'reference': '',
+                'steps': [],
+                'employee': employee_name if employee_col else 'Unknown',
+                'project': project_name if project_col else 'Unknown',
+                'client': client_name if client_col else 'Unknown'
+            }
+            
+            # Extract vulnerability details
+            for col in title_columns:
+                if col in df.columns and pd.notna(row[col]):
+                    vuln_detail['title'] = str(row[col]).strip()
+                    break
+            
+            for col in description_columns:
+                if col in df.columns and pd.notna(row[col]):
+                    vuln_detail['description'] = str(row[col]).strip()
+                    break
+            
+            for col in cve_columns:
+                if col in df.columns and pd.notna(row[col]):
+                    vuln_detail['cve_cwe'] = str(row[col]).strip()
+                    break
+            
+            for col in cvss_columns:
+                if col in df.columns and pd.notna(row[col]):
+                    vuln_detail['cvss'] = str(row[col]).strip()
+                    break
+            
+            for col in affected_asset_columns:
+                if col in df.columns and pd.notna(row[col]):
+                    vuln_detail['affected_asset'] = str(row[col]).strip()
+                    break
+            
+            for col in recommendation_columns:
+                if col in df.columns and pd.notna(row[col]):
+                    vuln_detail['recommendation'] = str(row[col]).strip()
+                    break
+            
+            for col in reference_columns:
+                if col in df.columns and pd.notna(row[col]):
+                    vuln_detail['reference'] = str(row[col]).strip()
+                    break
+            
+            # Extract steps (look for Step1, Step2, etc.)
+            for i in range(1, 10):
+                step_cols = [f'Step{i}', f'Step {i}', f'PoC_Step{i}', f'Proof_of_Concept_Step{i}']
+                for col in step_cols:
+                    if col in df.columns and pd.notna(row[col]):
+                        vuln_detail['steps'].append({
+                            'step_number': i,
+                            'content': str(row[col]).strip()
+                        })
+                        break
+            
+            data['vulnerabilities'].append(vuln_detail)
         
         # Convert sets to counts and calculate performance scores
         for emp_name, emp_data in data['employees'].items():
@@ -189,10 +335,20 @@ def extract_comprehensive_data_from_excel(file_path):
             client_data['project_count'] = len(client_data['projects'])
             client_data['employee_count'] = len(client_data['employees'])
         
+        # Convert asset sets to counts
+        for asset_name, asset_data in data['assets'].items():
+            asset_data['employees'] = list(asset_data['employees'])
+            asset_data['projects'] = list(asset_data['projects'])
+            asset_data['clients'] = list(asset_data['clients'])
+            asset_data['employee_count'] = len(asset_data['employees'])
+            asset_data['project_count'] = len(asset_data['projects'])
+            asset_data['client_count'] = len(asset_data['clients'])
+        
         # Update summary counts
         data['summary']['total_employees'] = len(data['employees'])
         data['summary']['total_projects'] = len(data['projects'])
         data['summary']['total_clients'] = len(data['clients'])
+        data['summary']['total_assets'] = len(data['assets'])
         
         return data
         
@@ -333,6 +489,106 @@ async def dashboard_home(request: Request):
             .performance-good { background: #d1ecf1; color: #0c5460; }
             .performance-average { background: #fff3cd; color: #856404; }
             .performance-poor { background: #f8d7da; color: #721c24; }
+            
+            /* Vulnerability Box Styles */
+            .vulnerability-box { 
+                display: flex; 
+                gap: 10px; 
+                margin: 10px 0; 
+                align-items: center;
+            }
+            .severity-box { 
+                padding: 8px 16px; 
+                border-radius: 4px; 
+                font-weight: bold; 
+                color: white;
+                text-align: center;
+                min-width: 100px;
+            }
+            .severity-critical { background-color: #dc3545; }
+            .severity-high { background-color: #fd7e14; }
+            .severity-medium { background-color: #ffc107; color: #212529; }
+            .severity-low { background-color: #28a745; }
+            .severity-info { background-color: #17a2b8; }
+            .status-box { 
+                padding: 8px 16px; 
+                border-radius: 4px; 
+                font-weight: bold; 
+                color: white;
+                text-align: center;
+                min-width: 80px;
+            }
+            .status-open { background-color: #ffc107; color: #212529; }
+            .status-closed { background-color: #28a745; }
+            .status-pending { background-color: #17a2b8; }
+            
+            .vulnerability-detail { 
+                background: white; 
+                margin: 20px 0; 
+                padding: 25px; 
+                border-radius: 12px; 
+                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+                border-left: 4px solid #667eea;
+            }
+            .vulnerability-header { 
+                display: flex; 
+                justify-content: space-between; 
+                align-items: center; 
+                margin-bottom: 20px;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .vulnerability-title { 
+                font-size: 1.4em; 
+                font-weight: bold; 
+                color: #333;
+                margin: 0;
+            }
+            .vulnerability-info { 
+                display: grid; 
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
+                gap: 15px; 
+                margin: 20px 0;
+            }
+            .info-item { 
+                display: flex; 
+                flex-direction: column;
+            }
+            .info-label { 
+                font-weight: bold; 
+                color: #667eea; 
+                margin-bottom: 5px;
+            }
+            .info-value { 
+                color: #333; 
+                background: #f8f9fa; 
+                padding: 8px; 
+                border-radius: 4px;
+            }
+            .vulnerability-description { 
+                margin: 20px 0; 
+                line-height: 1.6;
+                color: #333;
+            }
+            .steps-container { 
+                margin: 20px 0;
+            }
+            .step-item { 
+                margin: 15px 0; 
+                padding: 15px; 
+                background: #f8f9fa; 
+                border-radius: 8px; 
+                border-left: 4px solid #667eea;
+            }
+            .step-number { 
+                font-weight: bold; 
+                color: #667eea; 
+                margin-bottom: 10px;
+            }
+            .step-content { 
+                color: #333; 
+                line-height: 1.5;
+            }
         </style>
     </head>
     <body>
@@ -364,6 +620,8 @@ async def dashboard_home(request: Request):
             <div class="tab-container">
                 <div class="tab-buttons">
                     <button onclick="showTab('overview-tab')" class="btn" id="overview-tab-btn">📊 Overview</button>
+                    <button onclick="showTab('asset-table-tab')" class="btn" id="asset-table-tab-btn">📋 Asset VAPT Table</button>
+                    <button onclick="showTab('vulnerability-details-tab')" class="btn" id="vulnerability-details-tab-btn">🔍 Vulnerability Details</button>
                     <button onclick="showTab('employee-tab')" class="btn" id="employee-tab-btn">👥 Employee Analytics</button>
                     <button onclick="showTab('project-tab')" class="btn" id="project-tab-btn">📁 Project Analytics</button>
                     <button onclick="showTab('client-tab')" class="btn" id="client-tab-btn">🏢 Client Analytics</button>
@@ -388,6 +646,59 @@ async def dashboard_home(request: Request):
                             <h3>📈 Activity Timeline</h3>
                             <canvas id="activityTimelineChart"></canvas>
                         </div>
+                    </div>
+                </div>
+                
+                <div id="asset-table-tab" class="tab-content">
+                    <div class="table-container">
+                        <h3>📋 Dynamic Asset VAPT Status Table</h3>
+                        <div class="search-box">
+                            <input type="text" id="assetSearch" placeholder="Search assets..." onkeyup="filterAssetTable()">
+                        </div>
+                        <table class="data-table" id="assetTable">
+                            <thead>
+                                <tr style="background: linear-gradient(135deg, #667eea, #764ba2); color: white;">
+                                    <th style="background: #8e24aa; color: white;">Sr. No.</th>
+                                    <th style="background: #8e24aa; color: white;">Asset/Hostname</th>
+                                    <th style="background: #8e24aa; color: white;">Instant Purpose</th>
+                                    <th style="background: #8e24aa; color: white;">VAPT Status</th>
+                                    <th style="background: #dc3545; color: white;">Critical</th>
+                                    <th style="background: #fd7e14; color: white;">High</th>
+                                    <th style="background: #ffc107; color: white;">Medium</th>
+                                    <th style="background: #28a745; color: white;">Low</th>
+                                    <th style="background: #17a2b8; color: white;">Informational</th>
+                                    <th style="background: #8e24aa; color: white;">Total</th>
+                                    <th style="background: #8e24aa; color: white;">Tester Name</th>
+                                </tr>
+                            </thead>
+                            <tbody id="assetTableBody"></tbody>
+                            <tfoot>
+                                <tr style="background: #f8f9fa; font-weight: bold;">
+                                    <td colspan="4" style="text-align: left; background: #e9ecef;">Overall Findings</td>
+                                    <td id="totalCritical" style="background: #dc3545; color: white; font-weight: bold;">0</td>
+                                    <td id="totalHigh" style="background: #fd7e14; color: white; font-weight: bold;">0</td>
+                                    <td id="totalMedium" style="background: #ffc107; color: white; font-weight: bold;">0</td>
+                                    <td id="totalLow" style="background: #28a745; color: white; font-weight: bold;">0</td>
+                                    <td id="totalInfo" style="background: #17a2b8; color: white; font-weight: bold;">0</td>
+                                    <td id="totalAll" style="background: #8e24aa; color: white; font-weight: bold;">0</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                        <div style="margin-top: 15px;">
+                            <button onclick="addAssetRow()" style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+                                ➕ Add New Asset Row
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="vulnerability-details-tab" class="tab-content">
+                    <div id="vulnerability-details-content" style="display: none;">
+                        <div class="search-box">
+                            <input type="text" id="vulnSearch" placeholder="Search vulnerabilities..." onkeyup="filterVulnerabilityDetails()">
+                        </div>
+                        <div id="vulnerabilityDetailsContainer"></div>
                     </div>
                 </div>
                 
@@ -565,6 +876,8 @@ async def dashboard_home(request: Request):
 
                     comprehensiveData = await response.json();
                     displayOverview();
+                    updateAssetTable();
+                    updateVulnerabilityDetails();
                     updateEmployeeTable();
                     updateProjectTable();
                     updateClientTable();
@@ -663,6 +976,176 @@ async def dashboard_home(request: Request):
                         }
                     }
                 });
+            }
+
+            function updateAssetTable() {
+                if (!comprehensiveData) return;
+                
+                const tbody = document.getElementById('assetTableBody');
+                tbody.innerHTML = '';
+                
+                let totalCritical = 0, totalHigh = 0, totalMedium = 0, totalLow = 0, totalInfo = 0, totalAll = 0;
+
+                Object.values(comprehensiveData.assets).forEach((asset, index) => {
+                    const total = asset.critical + asset.high + asset.medium + asset.low + asset.info;
+                    totalCritical += asset.critical;
+                    totalHigh += asset.high;
+                    totalMedium += asset.medium;
+                    totalLow += asset.low;
+                    totalInfo += asset.info;
+                    totalAll += total;
+                    
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${asset.name}</td>
+                        <td>${asset.purpose}</td>
+                        <td>${asset.status}</td>
+                        <td class="severity-critical">${asset.critical}</td>
+                        <td class="severity-high">${asset.high}</td>
+                        <td class="severity-medium">${asset.medium}</td>
+                        <td class="severity-low">${asset.low}</td>
+                        <td class="severity-info">${asset.info}</td>
+                        <td><strong>${total}</strong></td>
+                        <td>${asset.employees.join(', ') || 'Unknown'}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                
+                // Update totals
+                document.getElementById('totalCritical').textContent = totalCritical;
+                document.getElementById('totalHigh').textContent = totalHigh;
+                document.getElementById('totalMedium').textContent = totalMedium;
+                document.getElementById('totalLow').textContent = totalLow;
+                document.getElementById('totalInfo').textContent = totalInfo;
+                document.getElementById('totalAll').textContent = totalAll;
+            }
+
+            function updateVulnerabilityDetails() {
+                if (!comprehensiveData) return;
+                
+                const container = document.getElementById('vulnerabilityDetailsContainer');
+                container.innerHTML = '';
+                
+                document.getElementById('vulnerability-details-content').style.display = 'block';
+
+                comprehensiveData.vulnerabilities.forEach(vuln => {
+                    const vulnDiv = document.createElement('div');
+                    vulnDiv.className = 'vulnerability-detail';
+                    
+                    const severityClass = getSeverityClass(vuln.severity);
+                    const statusClass = getStatusClass(vuln.status);
+                    
+                    let stepsHtml = '';
+                    if (vuln.steps && vuln.steps.length > 0) {
+                        stepsHtml = `
+                            <div class="steps-container">
+                                <h4>Proof of Concept Steps:</h4>
+                                ${vuln.steps.map(step => `
+                                    <div class="step-item">
+                                        <div class="step-number">Step ${step.step_number}:</div>
+                                        <div class="step-content">${step.content}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `;
+                    }
+                    
+                    vulnDiv.innerHTML = `
+                        <div class="vulnerability-header">
+                            <h3 class="vulnerability-title">Observation #${vuln.observation_number}</h3>
+                            <div class="vulnerability-box">
+                                <div class="severity-box ${severityClass}">Severity: ${vuln.severity}</div>
+                                <div class="status-box ${statusClass}">Status: ${vuln.status}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="vulnerability-info">
+                            <div class="info-item">
+                                <div class="info-label">CVE/CWE:</div>
+                                <div class="info-value">${vuln.cve_cwe || 'N/A'}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">CVSS Score:</div>
+                                <div class="info-value">${vuln.cvss || 'N/A'}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Affected Asset:</div>
+                                <div class="info-value">${vuln.affected_asset || 'N/A'}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Tester:</div>
+                                <div class="info-value">${vuln.employee}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Project:</div>
+                                <div class="info-value">${vuln.project}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Client:</div>
+                                <div class="info-value">${vuln.client}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="vulnerability-description">
+                            <h4>Vulnerability Title:</h4>
+                            <p><strong>${vuln.title || 'No title provided'}</strong></p>
+                            
+                            <h4>Detailed Description:</h4>
+                            <p>${vuln.description || 'No description provided'}</p>
+                            
+                            ${vuln.recommendation ? `
+                                <h4>Recommendation:</h4>
+                                <p>${vuln.recommendation}</p>
+                            ` : ''}
+                            
+                            ${vuln.reference ? `
+                                <h4>Reference:</h4>
+                                <p><a href="${vuln.reference}" target="_blank">${vuln.reference}</a></p>
+                            ` : ''}
+                        </div>
+                        
+                        ${stepsHtml}
+                    `;
+                    
+                    container.appendChild(vulnDiv);
+                });
+            }
+
+            function getSeverityClass(severity) {
+                const sev = severity.toLowerCase();
+                if (sev.includes('critical')) return 'severity-critical';
+                if (sev.includes('high')) return 'severity-high';
+                if (sev.includes('medium')) return 'severity-medium';
+                if (sev.includes('low')) return 'severity-low';
+                return 'severity-info';
+            }
+
+            function getStatusClass(status) {
+                const stat = status.toLowerCase();
+                if (stat.includes('closed') || stat.includes('fixed')) return 'status-closed';
+                if (stat.includes('pending')) return 'status-pending';
+                return 'status-open';
+            }
+
+            function addAssetRow() {
+                const tbody = document.getElementById('assetTableBody');
+                const rowCount = tbody.children.length;
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${rowCount + 1}</td>
+                    <td><input type="text" placeholder="Asset/Hostname" style="width: 100%; border: none; padding: 8px;"></td>
+                    <td><input type="text" placeholder="Purpose" style="width: 100%; border: none; padding: 8px;"></td>
+                    <td><input type="text" placeholder="Status" style="width: 100%; border: none; padding: 8px;"></td>
+                    <td><input type="number" min="0" value="0" style="width: 60px; border: none; padding: 8px; text-align: center;"></td>
+                    <td><input type="number" min="0" value="0" style="width: 60px; border: none; padding: 8px; text-align: center;"></td>
+                    <td><input type="number" min="0" value="0" style="width: 60px; border: none; padding: 8px; text-align: center;"></td>
+                    <td><input type="number" min="0" value="0" style="width: 60px; border: none; padding: 8px; text-align: center;"></td>
+                    <td><input type="number" min="0" value="0" style="width: 60px; border: none; padding: 8px; text-align: center;"></td>
+                    <td><strong>0</strong></td>
+                    <td><input type="text" placeholder="Tester Name" style="width: 100%; border: none; padding: 8px;"></td>
+                `;
+                tbody.appendChild(row);
             }
 
             function updateEmployeeTable() {
@@ -889,6 +1372,21 @@ async def dashboard_home(request: Request):
             }
 
             // Search functionality
+            function filterAssetTable() {
+                const searchTerm = document.getElementById('assetSearch').value.toLowerCase();
+                filterTable('assetTable', searchTerm);
+            }
+
+            function filterVulnerabilityDetails() {
+                const searchTerm = document.getElementById('vulnSearch').value.toLowerCase();
+                const vulnerabilities = document.querySelectorAll('.vulnerability-detail');
+                
+                vulnerabilities.forEach(vuln => {
+                    const text = vuln.textContent.toLowerCase();
+                    vuln.style.display = text.includes(searchTerm) ? '' : 'none';
+                });
+            }
+
             function filterEmployeeTable() {
                 const searchTerm = document.getElementById('employeeSearch').value.toLowerCase();
                 filterTable('employeeTable', searchTerm);
