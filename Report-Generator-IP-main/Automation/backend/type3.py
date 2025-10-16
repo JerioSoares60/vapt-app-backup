@@ -8,7 +8,6 @@ from docxtpl import DocxTemplate
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
 from datetime import datetime
 import traceback
 import tempfile
@@ -19,7 +18,7 @@ import io
 from sqlalchemy.orm import Session
 from db import get_db, AuditLog, CertINReport
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 app = FastAPI()
 
@@ -48,22 +47,75 @@ def sanitize_filename(filename):
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
     return safe_name
 
+def normalize_column_name(col):
+    """Normalize column names to handle case-insensitive and whitespace variations"""
+    return col.strip().lower().replace(' ', '_').replace('/', '_').replace('.', '')
+
 def read_vulnerability_excel(file_path):
+    """Read vulnerability data from Excel with flexible column matching"""
     try:
         df = pd.read_excel(file_path)
+        
+        # Create a mapping of normalized column names to original names
+        column_mapping = {normalize_column_name(col): col for col in df.columns}
+        
+        print(f"Excel columns found: {list(df.columns)}")
+        print(f"Normalized mapping: {column_mapping}")
+        
         vulnerabilities = []
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             vuln_data = {}
+            
+            # Map common column variations to standard keys
+            column_aliases = {
+                'observation_number': ['observation_number', 'obs_number', 'observation_', 'obs_'],
+                'new_or_repeat': ['new_or_repeat_observation', 'new_or_repeat', 'status_type'],
+                'cve_cwe': ['cve_cwe', 'cvecwe', 'cve', 'cwe'],
+                'cvss_version': ['cvss_version_ref', 'cvss_version', 'cvss_ref'],
+                'affected_asset': ['affected_asset_ie_ip_url_application_etc', 'affected_asset', 'asset', 'url'],
+                'title': ['observation_vulnerability_title', 'vulnerability_title', 'title', 'name'],
+                'description': ['detailed_observation_vulnerable_point', 'detailed_observation', 'description', 'details'],
+                'recommendation': ['recommendation', 'recommendations', 'remediation'],
+                'reference': ['reference', 'references', 'ref'],
+                'evidence': ['evidence_proof_of_concept', 'evidence', 'proof_of_concept', 'poc'],
+                'severity': ['severity', 'risk', 'criticality'],
+                'cvss': ['cvss', 'cvss_score'],
+                'cvss_vector': ['cvss_vector', 'vector'],
+                'status': ['status', 'state']
+            }
+            
+            # Try to find each field using aliases
+            for standard_key, aliases in column_aliases.items():
+                value = None
+                for alias in aliases:
+                    norm_alias = normalize_column_name(alias)
+                    if norm_alias in column_mapping:
+                        original_col = column_mapping[norm_alias]
+                        value = row[original_col]
+                        break
+                
+                # Store with standard key
+                vuln_data[standard_key] = str(value).strip() if pd.notna(value) else ""
+            
+            # Add raw row data for debugging
             for col in df.columns:
-                vuln_data[col] = str(row[col]) if pd.notna(row[col]) else ""
+                if col not in vuln_data:
+                    vuln_data[col] = str(row[col]) if pd.notna(row[col]) else ""
+            
             vulnerabilities.append(vuln_data)
+            print(f"Row {idx + 1} data: {vuln_data}")
+        
         return vulnerabilities
     except Exception as e:
         print(f"Error reading vulnerability Excel: {e}")
+        traceback.print_exc()
         return []
 
 async def process_poc_zip_files(poc_files, vulnerabilities):
-    """Process uploaded PoC zip files and map them to vulnerabilities by observation number"""
+    """
+    Process PoC zip with structure: POC_certIN.zip/POC_certIN/#1, #2, etc.
+    Each folder contains images for that specific observation only
+    """
     poc_mapping = {}
     
     for poc_file in poc_files:
@@ -82,104 +134,143 @@ async def process_poc_zip_files(poc_files, vulnerabilities):
             with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
             
-            # Get all images and organize them
-            all_images = []
+            print(f"Extracted zip to: {extract_dir}")
+            
+            # Find all observation folders (#1, #2, #3, etc.)
             for root, dirs, files in os.walk(extract_dir):
-                for file in files:
-                    if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
-                        full_path = os.path.join(root, file)
-                        # Extract observation number and step number from filename
-                        obs_num, step_num = extract_observation_and_step(file)
-                        all_images.append({
-                            'filename': file,
-                            'path': full_path,
-                            'observation_number': obs_num,
-                            'step_number': step_num
-                        })
-            
-            # Sort by observation number and step number
-            all_images.sort(key=lambda x: (x['observation_number'], x['step_number']))
-            
-            # Group images by observation
-            for img in all_images:
-                obs_key = f"OBS-{img['observation_number']:03d}"
-                if obs_key not in poc_mapping:
-                    poc_mapping[obs_key] = []
-                poc_mapping[obs_key].append(img)
+                for dir_name in dirs:
+                    # Check if directory name matches #1, #2, etc.
+                    match = re.match(r'#(\d+)', dir_name)
+                    if match:
+                        obs_num = int(match.group(1))
+                        obs_key = f"OBS-{obs_num:03d}"
+                        obs_folder = os.path.join(root, dir_name)
+                        
+                        print(f"Found observation folder: {obs_folder} for {obs_key}")
+                        
+                        # Get all images in this observation folder
+                        obs_images = []
+                        for img_file in os.listdir(obs_folder):
+                            if img_file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+                                img_path = os.path.join(obs_folder, img_file)
+                                
+                                # Extract step number from filename
+                                step_match = re.search(r'step[_\-]?(\d+)', img_file.lower())
+                                if step_match:
+                                    step_num = int(step_match.group(1))
+                                else:
+                                    # Try just extracting a number
+                                    num_match = re.search(r'(\d+)', img_file)
+                                    step_num = int(num_match.group(1)) if num_match else 999
+                                
+                                obs_images.append({
+                                    'filename': img_file,
+                                    'path': img_path,
+                                    'step_number': step_num
+                                })
+                                print(f"  Found image: {img_file} (Step {step_num})")
+                        
+                        # Sort images by step number
+                        obs_images.sort(key=lambda x: x['step_number'])
+                        
+                        if obs_images:
+                            poc_mapping[obs_key] = obs_images
+                            print(f"  Mapped {len(obs_images)} images to {obs_key}")
             
         except Exception as e:
             print(f"Error extracting PoC zip: {e}")
+            traceback.print_exc()
         finally:
             if os.path.exists(temp_zip_path):
                 os.remove(temp_zip_path)
     
+    print(f"Final PoC mapping: {list(poc_mapping.keys())}")
     return poc_mapping
 
-def extract_observation_and_step(filename):
-    """
-    Extract observation number and step number from filename.
-    Supports formats like:
-    - obs1_step1.png, obs1_step2.png
-    - observation1_step1.png
-    - 1_1.png (obs_step)
-    - step1_obs1.png
-    Falls back to sequential numbering if pattern not found
-    """
-    filename_lower = filename.lower()
+def parse_evidence_steps(evidence_text):
+    """Parse evidence/PoC text to extract step descriptions"""
+    if not evidence_text or evidence_text.lower() in ['nan', 'none', '']:
+        return []
     
-    # Try pattern: obs1_step1 or observation1_step1
-    match = re.search(r'obs(?:ervation)?(\d+)[_\-]step(\d+)', filename_lower)
-    if match:
-        return int(match.group(1)), int(match.group(2))
+    steps = []
     
-    # Try pattern: step1_obs1
-    match = re.search(r'step(\d+)[_\-]obs(?:ervation)?(\d+)', filename_lower)
-    if match:
-        return int(match.group(2)), int(match.group(1))
+    # Try to split by "Step X:" pattern
+    step_pattern = re.compile(r'Step\s*(\d+)\s*[:\-]?\s*(.+?)(?=Step\s*\d+|$)', re.IGNORECASE | re.DOTALL)
+    matches = step_pattern.findall(evidence_text)
     
-    # Try pattern: 1_1 (assuming obs_step)
-    match = re.search(r'(\d+)[_\-](\d+)', filename_lower)
-    if match:
-        return int(match.group(1)), int(match.group(2))
+    if matches:
+        for step_num, step_desc in matches:
+            steps.append({
+                'number': int(step_num),
+                'description': step_desc.strip()
+            })
+    else:
+        # If no step pattern, split by newlines and number each
+        lines = [line.strip() for line in evidence_text.split('\n') if line.strip()]
+        for i, line in enumerate(lines, 1):
+            steps.append({
+                'number': i,
+                'description': line
+            })
     
-    # Try just step number (assume observation 1)
-    match = re.search(r'step(\d+)', filename_lower)
-    if match:
-        return 1, int(match.group(1))
-    
-    # Default: extract any number as step, assume observation 1
-    match = re.search(r'(\d+)', filename_lower)
-    if match:
-        return 1, int(match.group(1))
-    
-    return 1, 999
+    return steps
 
 def generate_vulnerability_sections(vulnerabilities, poc_mapping):
-    """Generate vulnerability sections for the report"""
+    """Generate vulnerability sections with proper data extraction"""
     vulnerability_sections = []
     
     for i, vuln in enumerate(vulnerabilities, 1):
-        vuln_id = vuln.get('Vulnerability_ID', f'OBS-{i:03d}')
-        severity = vuln.get('Severity', 'Medium')
-        status = vuln.get('Status', 'Open')
-        cve_cwe = vuln.get('CVE_CWE', '')
-        cvss = vuln.get('CVSS', '0.0')
-        cvss_vector = vuln.get('CVSS_Vector', '')
-        affected_asset = vuln.get('Affected_Asset', '')
-        title = vuln.get('Vulnerability_Title', '')
-        description = vuln.get('Detailed_Description', '')
-        impact = vuln.get('Impact', '')
-        recommendations = vuln.get('Recommendations', '')
-        reproduction_steps = vuln.get('Reproduction_Steps', '')
+        print(f"\nProcessing vulnerability {i}:")
+        print(f"Available keys: {list(vuln.keys())}")
         
-        # Get PoC images for this vulnerability
+        # Extract data using standard keys from normalized mapping
+        obs_num = vuln.get('observation_number', str(i))
+        new_or_repeat = vuln.get('new_or_repeat', 'New')
+        cve_cwe = vuln.get('cve_cwe', '')
+        cvss_version = vuln.get('cvss_version', '')
+        affected_asset = vuln.get('affected_asset', '')
+        title = vuln.get('title', '')
+        description = vuln.get('description', '')
+        recommendation = vuln.get('recommendation', '')
+        reference = vuln.get('reference', '')
+        evidence_text = vuln.get('evidence', '')
+        
+        # Extract severity and other metadata
+        severity = vuln.get('severity', 'Medium')
+        cvss = vuln.get('cvss', '')
+        cvss_vector = vuln.get('cvss_vector', '')
+        status = vuln.get('status', 'Open')
+        
+        print(f"Extracted - Title: {title}, CVE: {cve_cwe}, Asset: {affected_asset}")
+        
+        # Parse evidence steps from Excel
+        evidence_steps = parse_evidence_steps(evidence_text)
+        
+        # Get PoC images for this observation
         obs_key = f"OBS-{i:03d}"
         poc_images = poc_mapping.get(obs_key, [])
         
-        # Generate recommendations list
+        print(f"Found {len(poc_images)} PoC images for {obs_key}")
+        print(f"Found {len(evidence_steps)} evidence steps from Excel")
+        
+        # Match images with step descriptions
+        matched_poc = []
+        for idx, img in enumerate(poc_images):
+            step_desc = ''
+            if idx < len(evidence_steps):
+                step_desc = evidence_steps[idx]['description']
+            
+            matched_poc.append({
+                'filename': img['filename'],
+                'path': img['path'],
+                'step_number': idx + 1,
+                'description': step_desc
+            })
+        
+        # Process recommendations
         recommendations_list = []
-        if recommendations:
-            rec_lines = [line.strip() for line in recommendations.split('\n') if line.strip()]
+        if recommendation:
+            rec_lines = [line.strip() for line in recommendation.split('\n') if line.strip()]
             for line in rec_lines:
                 clean_line = re.sub(r'^\d+\.\s*', '', line)
                 if clean_line:
@@ -187,28 +278,29 @@ def generate_vulnerability_sections(vulnerabilities, poc_mapping):
         
         vulnerability_section = {
             'observation_number': i,
-            'vulnerability_id': vuln_id,
+            'new_or_repeat': new_or_repeat,
             'severity': severity,
             'status': status,
             'cve_cwe': cve_cwe,
             'cvss': cvss,
+            'cvss_version': cvss_version,
             'cvss_vector': cvss_vector,
             'affected_asset': affected_asset,
             'title': title,
             'description': description,
-            'impact': impact,
             'recommendations': recommendations_list,
-            'reproduction_steps': reproduction_steps,
-            'poc_images': poc_images,
-            'has_poc': len(poc_images) > 0
+            'reference': reference,
+            'poc_images': matched_poc,
+            'has_poc': len(matched_poc) > 0
         }
         
         vulnerability_sections.append(vulnerability_section)
+        print(f"Created section with {len(matched_poc)} PoC images")
     
     return vulnerability_sections
 
 def create_landscape_vulnerability_box(doc, vulnerability_section):
-    """Create a properly formatted vulnerability box matching the expected layout"""
+    """Create properly formatted vulnerability box matching expected layout"""
     from docx.shared import Inches, Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import parse_xml
@@ -218,16 +310,15 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     table = doc.add_table(rows=2, cols=3)
     table.style = 'Table Grid'
     table.autofit = False
-    table.allow_autofit = False
     
-    # Set column widths for better layout
+    # Set column widths
     for row in table.rows:
         row.cells[0].width = Inches(2.5)
         row.cells[1].width = Inches(2.0)
         row.cells[2].width = Inches(2.0)
     
     # Get severity colors
-    severity = vulnerability_section.get('severity', 'Medium')
+    severity = vulnerability_section.get('severity', 'Medium').strip()
     severity_colors = {
         'Critical': {'bg': '990000', 'text': 'FFFFFF'},
         'High': {'bg': 'FF0000', 'text': 'FFFFFF'},
@@ -270,42 +361,64 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     shading_status = parse_xml(f'<w:shd {nsdecls("w")} w:fill="FFD966"/>')
     cell_status._element.get_or_add_tcPr().append(shading_status)
     
-    # Row 2: CVSS info merged across all columns
+    # Row 2: New or Repeat + CVSS (merged)
     cvss_cell = table.rows[1].cells[0]
     cvss_cell.merge(table.rows[1].cells[1])
     cvss_cell.merge(table.rows[1].cells[2])
     cvss_para = cvss_cell.paragraphs[0]
     cvss_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     
-    # Add CVSS: X.X
+    # New or Repeat
+    new_or_repeat = vulnerability_section.get('new_or_repeat', 'New')
+    if new_or_repeat:
+        nor_run = cvss_para.add_run(f"New or Repeat Observation: {new_or_repeat}")
+        nor_run.font.name = 'Calibri'
+        nor_run.font.size = Pt(10)
+        nor_run.font.bold = True
+        cvss_para.add_run("    ")
+    
+    # CVSS
     if vulnerability_section.get('cvss'):
         cvss_run = cvss_para.add_run(f"CVSS: {vulnerability_section['cvss']}")
         cvss_run.font.name = 'Calibri'
         cvss_run.font.size = Pt(10)
         cvss_run.font.bold = True
     
-    # Add a new row for detailed content
+    # Add content row
     content_row = table.add_row()
     content_cell = content_row.cells[0]
     content_cell.merge(content_row.cells[1])
     content_cell.merge(content_row.cells[2])
     
-    # Clear default paragraph and start fresh
+    # Clear default paragraph
     for p in content_cell.paragraphs:
         p.clear()
     
-    # Name of Report/Observation/Security Issue
-    if vulnerability_section.get('title'):
-        title_para = content_cell.add_paragraph()
-        title_run = title_para.add_run(f"Name of Report/Observation/Security Issue:\n")
-        title_run.font.name = 'Calibri'
-        title_run.font.size = Pt(10)
-        title_run.font.bold = True
+    # CVSS Version Ref
+    if vulnerability_section.get('cvss_version'):
+        cvss_ver_para = content_cell.add_paragraph()
+        cvss_ver_run = cvss_ver_para.add_run("CVSS Version Ref: ")
+        cvss_ver_run.font.name = 'Calibri'
+        cvss_ver_run.font.size = Pt(10)
+        cvss_ver_run.font.bold = True
         
-        title_text = title_para.add_run(vulnerability_section['title'])
-        title_text.font.name = 'Calibri'
-        title_text.font.size = Pt(10)
-        title_para.add_run("\n")
+        cvss_ver_text = cvss_ver_para.add_run(vulnerability_section['cvss_version'])
+        cvss_ver_text.font.name = 'Calibri'
+        cvss_ver_text.font.size = Pt(10)
+        cvss_ver_para.add_run("\n")
+    
+    # CVE/CWE
+    if vulnerability_section.get('cve_cwe'):
+        cve_para = content_cell.add_paragraph()
+        cve_run = cve_para.add_run("CVE/CWE: ")
+        cve_run.font.name = 'Calibri'
+        cve_run.font.size = Pt(10)
+        cve_run.font.bold = True
+        
+        cve_text = cve_para.add_run(vulnerability_section['cve_cwe'])
+        cve_text.font.name = 'Calibri'
+        cve_text.font.size = Pt(10)
+        cve_para.add_run("\n")
     
     # CVSS Vector
     if vulnerability_section.get('cvss_vector'):
@@ -320,23 +433,10 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
         vector_text.font.size = Pt(10)
         vector_para.add_run("\n")
     
-    # Observation/Vulnerability type
-    if vulnerability_section.get('cve_cwe'):
-        cve_para = content_cell.add_paragraph()
-        cve_run = cve_para.add_run("Observation/Vulnerability type: ")
-        cve_run.font.name = 'Calibri'
-        cve_run.font.size = Pt(10)
-        cve_run.font.bold = True
-        
-        cve_text = cve_para.add_run(vulnerability_section['cve_cwe'])
-        cve_text.font.name = 'Calibri'
-        cve_text.font.size = Pt(10)
-        cve_para.add_run("\n")
-    
-    # Observation Availability Info
+    # Affected Asset
     if vulnerability_section.get('affected_asset'):
         asset_para = content_cell.add_paragraph()
-        asset_run = asset_para.add_run("Observation Availability Info: ")
+        asset_run = asset_para.add_run("Affected Asset i.e. IP/URL/Application etc.: ")
         asset_run.font.name = 'Calibri'
         asset_run.font.size = Pt(10)
         asset_run.font.bold = True
@@ -344,12 +444,27 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
         asset_text = asset_para.add_run(vulnerability_section['affected_asset'])
         asset_text.font.name = 'Calibri'
         asset_text.font.size = Pt(10)
+        asset_text.font.color.rgb = RGBColor(0, 0, 255)  # Blue color for URL
+        asset_text.font.underline = True
         asset_para.add_run("\n")
     
-    # Detailed Observation/Vulnerable Point
+    # Vulnerability Title
+    if vulnerability_section.get('title'):
+        title_para = content_cell.add_paragraph()
+        title_run = title_para.add_run("Observation/ Vulnerability Title: ")
+        title_run.font.name = 'Calibri'
+        title_run.font.size = Pt(10)
+        title_run.font.bold = True
+        
+        title_text = title_para.add_run(vulnerability_section['title'])
+        title_text.font.name = 'Calibri'
+        title_text.font.size = Pt(10)
+        title_para.add_run("\n")
+    
+    # Detailed Observation
     if vulnerability_section.get('description'):
         desc_para = content_cell.add_paragraph()
-        desc_run = desc_para.add_run("Detailed Observation/Vulnerable Point:\n")
+        desc_run = desc_para.add_run("Detailed Observation/ Vulnerable Point: ")
         desc_run.font.name = 'Calibri'
         desc_run.font.size = Pt(10)
         desc_run.font.bold = True
@@ -362,7 +477,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     # Recommendations
     if vulnerability_section.get('recommendations'):
         rec_para = content_cell.add_paragraph()
-        rec_run = rec_para.add_run("Recommendations:\n")
+        rec_run = rec_para.add_run("Recommendation:\n")
         rec_run.font.name = 'Calibri'
         rec_run.font.size = Pt(10)
         rec_run.font.bold = True
@@ -373,31 +488,36 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
             rec_text.font.size = Pt(10)
         rec_para.add_run("\n")
     
-    # Reference (if available)
-    reference = vulnerability_section.get('reference', '')
-    if reference:
+    # Reference
+    if vulnerability_section.get('reference'):
         ref_para = content_cell.add_paragraph()
         ref_run = ref_para.add_run("Reference:\n")
         ref_run.font.name = 'Calibri'
         ref_run.font.size = Pt(10)
         ref_run.font.bold = True
         
-        ref_text = ref_para.add_run(reference)
+        ref_text = ref_para.add_run(vulnerability_section['reference'])
         ref_text.font.name = 'Calibri'
         ref_text.font.size = Pt(10)
+        ref_text.font.color.rgb = RGBColor(0, 0, 255)
+        ref_text.font.underline = True
         ref_para.add_run("\n")
     
     # Evidence/Proof of Concept
     if vulnerability_section.get('has_poc') and vulnerability_section.get('poc_images'):
         poc_para = content_cell.add_paragraph()
-        poc_run = poc_para.add_run("Evidence/Proof of Concept:\n")
+        poc_run = poc_para.add_run("Evidence / Proof of Concept:\n")
         poc_run.font.name = 'Calibri'
         poc_run.font.size = Pt(10)
         poc_run.font.bold = True
         
-        for step_idx, poc_img in enumerate(vulnerability_section['poc_images'], 1):
+        for poc_img in vulnerability_section['poc_images']:
             step_para = content_cell.add_paragraph()
-            step_run = step_para.add_run(f"Step {step_idx}:\n")
+            step_text = f"Step {poc_img['step_number']}: "
+            if poc_img.get('description'):
+                step_text += poc_img['description']
+            
+            step_run = step_para.add_run(step_text + "\n")
             step_run.font.name = 'Calibri'
             step_run.font.size = Pt(10)
             step_run.font.bold = True
@@ -438,7 +558,7 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         tools_software = json.loads(data.get('tools_software', '[]'))
         
         vulnerability_sections = []
-        if vulnerability_data and poc_mapping:
+        if vulnerability_data and poc_mapping is not None:
             vulnerability_sections = generate_vulnerability_sections(vulnerability_data, poc_mapping)
         
         context = {
@@ -546,8 +666,6 @@ def _sanitize_docx_jinja_placeholders(template_path: str) -> str:
     except Exception:
         return template_path
 
-# REST OF THE CODE REMAINS THE SAME (HTML form, routes, etc.)
-# ... [Include all the remaining routes from original code]
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Serve the Cert-IN form interface"""
@@ -559,7 +677,7 @@ async def root():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Cert-IN Report Generator</title>
         <style>
-            body { font-family: Altone Trial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+            body { font-family: Calibri, sans-serif; margin: 20px; background-color: #f5f5f5; }
             .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
             h1 { color: #6923d0; text-align: center; margin-bottom: 30px; }
             .form-section { margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
@@ -585,11 +703,14 @@ async def root():
             .result { display: none; margin: 20px 0; padding: 15px; border-radius: 4px; }
             .result.success { background-color: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
             .result.error { background-color: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+            .info-box { background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 15px; margin: 15px 0; }
+            .info-box h4 { margin-top: 0; color: #2196F3; }
+            .info-box code { background-color: #fff; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🔒 Cert-IN Report Generator</h1>
+            <h1>🔒 Cert-IN Report Generator v2.2</h1>
             <div style="text-align:center;margin-bottom:16px;">
                 <a href="/report_formats.html" class="btn btn-secondary" style="text-decoration:none;display:inline-block;">← Back to Report Formats</a>
             </div>
@@ -794,34 +915,46 @@ async def root():
 
                 <!-- Vulnerability Data Upload -->
                 <div class="form-section">
-                    <h3>🔍 Vulnerability Data (Optional)</h3>
-                    <div class="form-group">
-                        <label for="vulnerability_file">Upload Vulnerability Excel File (certin_vulnerability_format.xlsx)</label>
-                        <input type="file" id="vulnerability_file" name="vulnerability_file" accept=".xlsx,.xls">
-                        <small style="color: #666;">If not provided, vulnerability section will be empty</small>
-                    </div>
+                    <h3>🔍 Vulnerability Data (Required)</h3>
                     
-                    <div class="form-group">
-                        <label for="poc_files">Upload PoC Zip File (Single file containing all images)</label>
-                        <input type="file" id="poc_files" name="poc_files" accept=".zip">
-                        <small style="color: #666;">
-                            <strong>Single Zip File:</strong> Upload one zip file containing all PoC images<br>
-                            <strong>Image Naming:</strong> step1.png, step2.png, step3.png, etc.
-                        </small>
-                    </div>
-                    
-                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 4px; margin-top: 10px;">
-                        <h4 style="margin-top: 0; color: #6923d0;">📋 PoC File Structure Guide</h4>
-                        <p><strong>Single Zip File:</strong> Upload one zip file containing all PoC images</p>
-                        <p><strong>Image Naming Convention:</strong></p>
+                    <div class="info-box">
+                        <h4>📋 Excel Format Requirements</h4>
+                        <p><strong>Required columns (any case/spacing):</strong></p>
                         <ul>
-                            <li><code>step1.png</code> - First step of Observation #1</li>
-                            <li><code>step2.png</code> - Second step of Observation #1</li>
-                            <li><code>step3.png</code> - First step of Observation #2</li>
-                            <li><code>step4.png</code> - Second step of Observation #2</li>
-                            <li>... (images will be automatically mapped to observations)</li>
+                            <li><code>New or Repeat Observation</code></li>
+                            <li><code>CVE/CWE</code></li>
+                            <li><code>CVSS Version Ref</code></li>
+                            <li><code>Affected Asset i.e. IP/URL/Application etc.</code></li>
+                            <li><code>Observation/ Vulnerability Title</code></li>
+                            <li><code>Detailed Observation/ Vulnerable Point</code></li>
+                            <li><code>Recommendation</code></li>
+                            <li><code>Reference</code></li>
+                            <li><code>Evidence / Proof of Concept</code> - Write step descriptions here</li>
                         </ul>
-                        <p><strong>Note:</strong> Images will be automatically mapped to observations based on their step numbers and order in the Excel file.</p>
+                        <p><strong>Note:</strong> Column names are case-insensitive and flexible with spaces</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="vulnerability_file">Upload Vulnerability Excel File *</label>
+                        <input type="file" id="vulnerability_file" name="vulnerability_file" accept=".xlsx,.xls" required>
+                    </div>
+                    
+                    <div class="info-box">
+                        <h4>📁 PoC Zip Structure Requirements</h4>
+                        <p><strong>Folder Structure:</strong></p>
+                        <code>POC_certIN.zip/POC_certIN/#1, #2, #3</code>
+                        <p><strong>Example:</strong></p>
+                        <ul>
+                            <li><code>POC_certIN/#1/step1.png</code> → Observation #1, Step 1</li>
+                            <li><code>POC_certIN/#1/step2.png</code> → Observation #1, Step 2</li>
+                            <li><code>POC_certIN/#2/step1.png</code> → Observation #2, Step 1</li>
+                        </ul>
+                        <p><strong>Important:</strong> Each <code>#N</code> folder contains ONLY images for that observation</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="poc_files">Upload PoC Zip File *</label>
+                        <input type="file" id="poc_files" name="poc_files" accept=".zip" required>
                     </div>
                 </div>
 
@@ -846,7 +979,6 @@ async def root():
         </div>
 
         <script>
-            // CSRF token fetch
             let CSRF_TOKEN = null;
             (async () => {
                 try {
@@ -858,7 +990,6 @@ async def root():
                 } catch (_) {}
             })();
 
-            // Dynamic form functions
             function addChangeHistory() {
                 const container = document.getElementById('changeHistoryList');
                 const div = document.createElement('div');
@@ -979,14 +1110,12 @@ async def root():
                 button.parentElement.remove();
             }
 
-            // Form submission
             document.getElementById('certinForm').addEventListener('submit', async function(e) {
                 e.preventDefault();
                 
                 const formData = new FormData();
                 const form = document.getElementById('certinForm');
                 
-                // Collect all form data
                 for (let element of form.elements) {
                     if (element.name && element.type !== 'file') {
                         if (element.type === 'checkbox') {
@@ -999,19 +1128,16 @@ async def root():
                     }
                 }
                 
-                // Handle file uploads
                 const vulnerabilityFile = document.getElementById('vulnerability_file').files[0];
                 if (vulnerabilityFile) {
                     formData.append('vulnerability_file', vulnerabilityFile);
                 }
                 
-                // Handle PoC zip file (single file)
                 const pocFile = document.getElementById('poc_files').files[0];
                 if (pocFile) {
                     formData.append('poc_files', pocFile);
                 }
                 
-                // Process dynamic arrays
                 const changeVersions = document.querySelectorAll('input[name="change_version[]"]');
                 const changeDates = document.querySelectorAll('input[name="change_date[]"]');
                 const changeRemarks = document.querySelectorAll('input[name="change_remarks[]"]');
@@ -1026,7 +1152,6 @@ async def root():
                 }
                 formData.append('document_change_history', JSON.stringify(changeHistory));
                 
-                // Similar processing for other dynamic arrays...
                 const distNames = document.querySelectorAll('input[name="dist_name[]"]');
                 const distOrgs = document.querySelectorAll('input[name="dist_organization[]"]');
                 const distDesignations = document.querySelectorAll('input[name="dist_designation[]"]');
@@ -1043,7 +1168,6 @@ async def root():
                 }
                 formData.append('distribution_list', JSON.stringify(distributionList));
                 
-                // Engagement Scope
                 const scopeSrNos = document.querySelectorAll('input[name="scope_sr_no[]"]');
                 const scopeAssets = document.querySelectorAll('input[name="scope_asset[]"]');
                 const scopeCriticalities = document.querySelectorAll('input[name="scope_criticality[]"]');
@@ -1072,7 +1196,6 @@ async def root():
                 }
                 formData.append('engagement_scope', JSON.stringify(engagementScope));
                 
-                // Auditing Team
                 const teamNames = document.querySelectorAll('input[name="team_name[]"]');
                 const teamDesignations = document.querySelectorAll('input[name="team_designation[]"]');
                 const teamEmails = document.querySelectorAll('input[name="team_email[]"]');
@@ -1082,7 +1205,7 @@ async def root():
                 const auditingTeam = [];
                 for (let i = 0; i < teamNames.length; i++) {
                     auditingTeam.push({
-                        sr_no: i + 1,  // Add serial number for template
+                        sr_no: i + 1,
                         name: teamNames[i].value,
                         designation: teamDesignations[i].value,
                         email: teamEmails[i].value,
@@ -1092,7 +1215,6 @@ async def root():
                 }
                 formData.append('auditing_team', JSON.stringify(auditingTeam));
                 
-                // Audit Activities
                 const activityTasks = document.querySelectorAll('input[name="activity_task[]"]');
                 const activityDates = document.querySelectorAll('input[name="activity_date[]"]');
                 
@@ -1105,7 +1227,6 @@ async def root():
                 }
                 formData.append('audit_activities', JSON.stringify(auditActivities));
                 
-                // Tools/Software
                 const toolSrNos = document.querySelectorAll('input[name="tool_sr_no[]"]');
                 const toolNames = document.querySelectorAll('input[name="tool_name[]"]');
                 const toolVersions = document.querySelectorAll('input[name="tool_version[]"]');
@@ -1154,6 +1275,8 @@ async def root():
                     document.getElementById('result').innerHTML = `
                         <h3>✅ Report Generated Successfully!</h3>
                         <p><strong>Filename:</strong> ${result.filename}</p>
+                        <p><strong>Vulnerabilities:</strong> ${result.vulnerability_count}</p>
+                        <p><strong>PoC Images:</strong> ${result.poc_count} observations with images</p>
                         <a href="${result.download_url}" download class="btn btn-success">
                             📥 Download Report
                         </a>
@@ -1184,16 +1307,14 @@ async def generate_report(
 ):
     """Generate Cert-IN report from form data"""
     try:
-        print(f"Starting Cert-IN report generation from form - Version {VERSION}")
+        print(f"Starting Cert-IN report generation - Version {VERSION}")
 
-        # Extract form data
         form = await request.form()
         data = {k: form.get(k) for k in form.keys()}
 
         vulnerability_data = []
         poc_mapping = {}
 
-        # Handle vulnerability file upload
         if 'vulnerability_file' in data and data['vulnerability_file']:
             vulnerability_file = data['vulnerability_file']
             temp_path = os.path.join(UPLOAD_DIR, f"temp_vuln_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
@@ -1204,32 +1325,26 @@ async def generate_report(
             vulnerability_data = read_vulnerability_excel(temp_path)
             os.remove(temp_path)
 
-        # Handle PoC zip file if provided
         if 'poc_files' in data and data['poc_files']:
             poc_file = data['poc_files']
             poc_mapping = await process_poc_zip_files([poc_file], vulnerability_data)
 
-        # Template path
         template_path = os.path.join(os.path.dirname(__file__), "CSS Certin temp.docx")
         if not os.path.exists(template_path):
             raise HTTPException(status_code=404, detail="Cert-IN template not found")
 
-        # Generate report filename
         client_name = data.get('client_name', 'Client')
-        raw_filename = f"{client_name} Cert-IN Report {datetime.now().strftime('%Y-%d-%m')}.docx"
+        raw_filename = f"{client_name}_Cert-IN_Report_{datetime.now().strftime('%Y-%m-%d')}.docx"
         output_path = os.path.join(UPLOAD_DIR, raw_filename)
 
-        # Generate the report file
         generate_certin_report_from_form(data, template_path, output_path, vulnerability_data, poc_mapping)
 
-        # ✅ Sanitize and rename output file (fix for spaces)
         safe_filename = os.path.basename(output_path).replace(" ", "_")
         safe_output_path = os.path.join(os.path.dirname(output_path), safe_filename)
 
         if output_path != safe_output_path:
             os.rename(output_path, safe_output_path)
 
-        # Save report details in DB
         try:
             user = request.session.get('user') or {}
             certin_report = CertINReport(
@@ -1262,9 +1377,8 @@ async def generate_report(
         except Exception as e:
             print(f"Error saving to database: {e}")
 
-        print(f"Cert-IN report generation completed successfully - Version {VERSION}")
+        print(f"Report generated successfully - Version {VERSION}")
 
-        # Log the action
         try:
             user = request.session.get('user') or {}
             db.add(AuditLog(
@@ -1287,7 +1401,6 @@ async def generate_report(
         except Exception as e:
             print(f"Error logging audit: {e}")
 
-        # ✅ Final response
         return JSONResponse(
             content={
                 "message": "Cert-IN report generated successfully",
@@ -1309,7 +1422,6 @@ async def generate_report(
 async def download_report(filename: str):
     """Download generated report"""
     try:
-        # Sanitize filename
         safe_filename = sanitize_filename(filename)
         file_path = os.path.join(UPLOAD_DIR, safe_filename)
         
@@ -1326,7 +1438,6 @@ async def download_report(filename: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/reports/")
 async def list_reports(request: Request, db: Session = Depends(get_db)):
