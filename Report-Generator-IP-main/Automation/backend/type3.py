@@ -333,7 +333,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     p_obs = cell_obs.paragraphs[0]
     p_obs.alignment = WD_ALIGN_PARAGRAPH.LEFT
     r_obs = p_obs.add_run(f"Observation: #{vulnerability_section['observation_number']}")
-    r_obs.font.name = 'Calibri'
+    r_obs.font.name = 'Altone Trial'
     r_obs.font.size = Pt(11)
     r_obs.font.bold = True
 
@@ -342,7 +342,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     p_sev = cell_sev.paragraphs[0]
     p_sev.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r_sev = p_sev.add_run(f"Severity: {severity}")
-    r_sev.font.name = 'Calibri'
+    r_sev.font.name = 'Altone Trial'
     r_sev.font.size = Pt(11)
     r_sev.font.bold = True
     r_sev.font.color.rgb = RGBColor(255, 255, 255) if colors['text'] == 'FFFFFF' else RGBColor(0, 0, 0)
@@ -355,7 +355,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     p_stat.alignment = WD_ALIGN_PARAGRAPH.CENTER
     status_text = vulnerability_section.get('status', 'Open')
     r_stat = p_stat.add_run(f"Status: {status_text}")
-    r_stat.font.name = 'Calibri'
+    r_stat.font.name = 'Altone Trial'
     r_stat.font.size = Pt(11)
     r_stat.font.bold = True
     shading_status = parse_xml(f'<w:shd {nsdecls("w")} w:fill="FFD966"/>')
@@ -372,7 +372,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     new_or_repeat = vulnerability_section.get('new_or_repeat', 'New')
     if new_or_repeat:
         nor_run = cvss_para.add_run(f"New or Repeat Observation: {new_or_repeat}")
-        nor_run.font.name = 'Calibri'
+        nor_run.font.name = 'Altone Trial'
         nor_run.font.size = Pt(10)
         nor_run.font.bold = True
         cvss_para.add_run("    ")
@@ -380,7 +380,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     # CVSS
     if vulnerability_section.get('cvss'):
         cvss_run = cvss_para.add_run(f"CVSS: {vulnerability_section['cvss']}")
-        cvss_run.font.name = 'Calibri'
+        cvss_run.font.name = 'Altone Trial'
         cvss_run.font.size = Pt(10)
         cvss_run.font.bold = True
     
@@ -398,12 +398,12 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('cvss_version'):
         cvss_ver_para = content_cell.add_paragraph()
         cvss_ver_run = cvss_ver_para.add_run("CVSS Version Ref: ")
-        cvss_ver_run.font.name = 'Calibri'
+        cvss_ver_run.font.name = 'Altone Trial'
         cvss_ver_run.font.size = Pt(10)
         cvss_ver_run.font.bold = True
         
         cvss_ver_text = cvss_ver_para.add_run(vulnerability_section['cvss_version'])
-        cvss_ver_text.font.name = 'Calibri'
+        cvss_ver_text.font.name = 'Altone Trial'
         cvss_ver_text.font.size = Pt(10)
         cvss_ver_para.add_run("\n")
     
@@ -411,12 +411,12 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('cve_cwe'):
         cve_para = content_cell.add_paragraph()
         cve_run = cve_para.add_run("CVE/CWE: ")
-        cve_run.font.name = 'Calibri'
+        cve_run.font.name = 'Altone Trial'
         cve_run.font.size = Pt(10)
         cve_run.font.bold = True
         
         cve_text = cve_para.add_run(vulnerability_section['cve_cwe'])
-        cve_text.font.name = 'Calibri'
+        cve_text.font.name = 'Altone Trial'
         cve_text.font.size = Pt(10)
         cve_para.add_run("\n")
     
@@ -424,12 +424,12 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('cvss_vector'):
         vector_para = content_cell.add_paragraph()
         vector_run = vector_para.add_run("CVSS Vector: ")
-        vector_run.font.name = 'Calibri'
+        vector_run.font.name = 'Altone Trial'
         vector_run.font.size = Pt(10)
         vector_run.font.bold = True
         
         vector_text = vector_para.add_run(vulnerability_section['cvss_vector'])
-        vector_text.font.name = 'Calibri'
+        vector_text.font.name = 'Altone Trial'
         vector_text.font.size = Pt(10)
         vector_para.add_run("\n")
     
@@ -437,12 +437,12 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('affected_asset'):
         asset_para = content_cell.add_paragraph()
         asset_run = asset_para.add_run("Affected Asset i.e. IP/URL/Application etc.: ")
-        asset_run.font.name = 'Calibri'
+        asset_run.font.name = 'Altone Trial'
         asset_run.font.size = Pt(10)
         asset_run.font.bold = True
         
         asset_text = asset_para.add_run(vulnerability_section['affected_asset'])
-        asset_text.font.name = 'Calibri'
+        asset_text.font.name = 'Altone Trial'
         asset_text.font.size = Pt(10)
         asset_text.font.color.rgb = RGBColor(0, 0, 255)  # Blue color for URL
         asset_text.font.underline = True
@@ -452,12 +452,12 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('title'):
         title_para = content_cell.add_paragraph()
         title_run = title_para.add_run("Observation/ Vulnerability Title: ")
-        title_run.font.name = 'Calibri'
+        title_run.font.name = 'Altone Trial'
         title_run.font.size = Pt(10)
         title_run.font.bold = True
         
         title_text = title_para.add_run(vulnerability_section['title'])
-        title_text.font.name = 'Calibri'
+        title_text.font.name = 'Altone Trial'
         title_text.font.size = Pt(10)
         title_para.add_run("\n")
     
@@ -465,12 +465,12 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('description'):
         desc_para = content_cell.add_paragraph()
         desc_run = desc_para.add_run("Detailed Observation/ Vulnerable Point: ")
-        desc_run.font.name = 'Calibri'
+        desc_run.font.name = 'Altone Trial'
         desc_run.font.size = Pt(10)
         desc_run.font.bold = True
         
         desc_text = desc_para.add_run(vulnerability_section['description'])
-        desc_text.font.name = 'Calibri'
+        desc_text.font.name = 'Altone Trial'
         desc_text.font.size = Pt(10)
         desc_para.add_run("\n")
     
@@ -478,13 +478,13 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('recommendations'):
         rec_para = content_cell.add_paragraph()
         rec_run = rec_para.add_run("Recommendation:\n")
-        rec_run.font.name = 'Calibri'
+        rec_run.font.name = 'Altone Trial'
         rec_run.font.size = Pt(10)
         rec_run.font.bold = True
         
         for i, rec in enumerate(vulnerability_section['recommendations'], 1):
             rec_text = rec_para.add_run(f"{i}. {rec}\n")
-            rec_text.font.name = 'Calibri'
+            rec_text.font.name = 'Altone Trial'
             rec_text.font.size = Pt(10)
         rec_para.add_run("\n")
     
@@ -492,12 +492,12 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('reference'):
         ref_para = content_cell.add_paragraph()
         ref_run = ref_para.add_run("Reference:\n")
-        ref_run.font.name = 'Calibri'
+        ref_run.font.name = 'Altone Trial'
         ref_run.font.size = Pt(10)
         ref_run.font.bold = True
         
         ref_text = ref_para.add_run(vulnerability_section['reference'])
-        ref_text.font.name = 'Calibri'
+        ref_text.font.name = 'Altone Trial'
         ref_text.font.size = Pt(10)
         ref_text.font.color.rgb = RGBColor(0, 0, 255)
         ref_text.font.underline = True
@@ -507,7 +507,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     if vulnerability_section.get('has_poc') and vulnerability_section.get('poc_images'):
         poc_para = content_cell.add_paragraph()
         poc_run = poc_para.add_run("Evidence / Proof of Concept:\n")
-        poc_run.font.name = 'Calibri'
+        poc_run.font.name = 'Altone Trial'
         poc_run.font.size = Pt(10)
         poc_run.font.bold = True
         
@@ -518,7 +518,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
                 step_text += poc_img['description']
             
             step_run = step_para.add_run(step_text + "\n")
-            step_run.font.name = 'Calibri'
+            step_run.font.name = 'Altone Trial'
             step_run.font.size = Pt(10)
             step_run.font.bold = True
             
@@ -532,13 +532,13 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
                 except Exception as e:
                     print(f"Error adding image {poc_img['filename']}: {e}")
                     missing_run = img_para.add_run(f"[Image error: {poc_img['filename']}]")
-                    missing_run.font.name = 'Calibri'
+                    missing_run.font.name = 'Altone Trial'
                     missing_run.font.size = Pt(9)
                     missing_run.font.italic = True
             else:
                 missing_para = content_cell.add_paragraph()
                 missing_run = missing_para.add_run(f"[Image missing: {poc_img['filename']}]")
-                missing_run.font.name = 'Calibri'
+                missing_run.font.name = 'Altone Trial'
                 missing_run.font.size = Pt(9)
                 missing_run.font.italic = True
     
@@ -604,7 +604,7 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
             vuln_heading = doc.add_paragraph()
             vuln_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
             vuln_run = vuln_heading.add_run("Detailed Observations")
-            vuln_run.font.name = 'Calibri'
+            vuln_run.font.name = 'Altone Trial'
             vuln_run.font.size = Pt(18)
             vuln_run.font.bold = True
             vuln_run.font.color.rgb = RGBColor(106, 68, 154)
