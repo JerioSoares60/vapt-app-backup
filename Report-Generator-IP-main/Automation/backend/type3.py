@@ -128,13 +128,17 @@ async def process_poc_zip_files(poc_files, vulnerabilities):
             f.write(content)
         
         extract_dir = os.path.join(UPLOAD_DIR, "poc_images")
+        # Clean extract directory to prevent contamination from previous uploads
+        if os.path.exists(extract_dir):
+            import shutil
+            shutil.rmtree(extract_dir)
         os.makedirs(extract_dir, exist_ok=True)
         
         try:
             with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
             
-            print(f"Extracted zip to: {extract_dir}")
+            print(f"✅ Extracted zip to: {extract_dir}")
             
             # Find all observation folders (#1, #2, #3, etc.)
             for root, dirs, files in os.walk(extract_dir):
@@ -146,36 +150,36 @@ async def process_poc_zip_files(poc_files, vulnerabilities):
                         obs_key = f"OBS-{obs_num:03d}"
                         obs_folder = os.path.join(root, dir_name)
                         
-                        print(f"Found observation folder: {obs_folder} for {obs_key}")
+                        print(f"📁 Found observation folder: {obs_folder} for {obs_key}")
                         
-                        # Get all images in this observation folder
+                        # Get all images in this observation folder ONLY
                         obs_images = []
-                        for img_file in os.listdir(obs_folder):
+                        for img_file in sorted(os.listdir(obs_folder)):
                             if img_file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
                                 img_path = os.path.join(obs_folder, img_file)
                                 
                                 # Extract step number from filename
-                                step_match = re.search(r'step[_\-]?(\d+)', img_file.lower())
+                                step_match = re.search(r'step[_\-\s]?(\d+)', img_file.lower())
                                 if step_match:
                                     step_num = int(step_match.group(1))
                                 else:
                                     # Try just extracting a number
                                     num_match = re.search(r'(\d+)', img_file)
-                                    step_num = int(num_match.group(1)) if num_match else 999
+                                    step_num = int(num_match.group(1)) if num_match else len(obs_images) + 1
                                 
                                 obs_images.append({
                                     'filename': img_file,
                                     'path': img_path,
                                     'step_number': step_num
                                 })
-                                print(f"  Found image: {img_file} (Step {step_num})")
+                                print(f"  🖼️  Found image: {img_file} (Step {step_num})")
                         
                         # Sort images by step number
                         obs_images.sort(key=lambda x: x['step_number'])
                         
                         if obs_images:
                             poc_mapping[obs_key] = obs_images
-                            print(f"  Mapped {len(obs_images)} images to {obs_key}")
+                            print(f"✅ Mapped {len(obs_images)} images to {obs_key}")
             
         except Exception as e:
             print(f"Error extracting PoC zip: {e}")
@@ -184,7 +188,9 @@ async def process_poc_zip_files(poc_files, vulnerabilities):
             if os.path.exists(temp_zip_path):
                 os.remove(temp_zip_path)
     
-    print(f"Final PoC mapping: {list(poc_mapping.keys())}")
+    print(f"🎯 Final PoC mapping keys: {list(poc_mapping.keys())}")
+    for key, images in poc_mapping.items():
+        print(f"   {key}: {len(images)} images")
     return poc_mapping
 
 def parse_evidence_steps(evidence_text):
