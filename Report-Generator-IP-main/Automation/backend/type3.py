@@ -66,22 +66,48 @@ def read_vulnerability_excel(file_path):
         for idx, row in df.iterrows():
             vuln_data = {}
             
-            # Map common column variations to standard keys
+            # Enhanced column aliases for the standardized Excel format
             column_aliases = {
-                'observation_number': ['observation_number', 'obs_number', 'observation_', 'obs_'],
-                'new_or_repeat': ['new_or_repeat_observation', 'new_or_repeat', 'status_type'],
-                'cve_cwe': ['cve_cwe', 'cvecwe', 'cve', 'cwe'],
-                'cvss_version': ['cvss_version_ref', 'cvss_version', 'cvss_ref'],
-                'affected_asset': ['affected_asset_ie_ip_url_application_etc', 'affected_asset', 'asset', 'url'],
-                'title': ['observation_vulnerability_title', 'vulnerability_title', 'title', 'name'],
-                'description': ['detailed_observation_vulnerable_point', 'detailed_observation', 'description', 'details'],
-                'recommendation': ['recommendation', 'recommendations', 'remediation'],
-                'reference': ['reference', 'references', 'ref'],
-                'evidence': ['evidence_proof_of_concept', 'evidence', 'proof_of_concept', 'poc'],
-                'severity': ['severity', 'risk', 'criticality'],
-                'cvss': ['cvss', 'cvss_score'],
-                'cvss_vector': ['cvss_vector', 'vector'],
-                'status': ['status', 'state']
+                # Core identification fields
+                'observation_number': ['srno', 'sr_no', 'sno', 'observation_number', 'obs_number', 'observation'],
+                'observation': ['observation', 'obs', 'observation_id', 'vuln_id'],
+                'new_or_repeat': ['neworre', 'new_or_re', 'new_or_repeat_observation', 'new_or_repeat', 'status_type'],
+                
+                # Asset and project info (KEY ADDITIONS)
+                'asset': ['assethostname', 'asset_hostname', 'asset', 'hostname', 'url', 'ip'],
+                'purpose': ['instantpurpose', 'instant_purpose', 'purpose', 'asset_purpose'],
+                'vapt_status': ['vaptstatus', 'vapt_status', 'assessment_status', 'overall_status'],
+                'tester_name': ['testername', 'tester_name', 'reportedby', 'reported_by', 'name', 'analyst'],
+                'project': ['project', 'projectname', 'project_name', 'assessment'],
+                'client': ['clientname', 'client_name', 'client', 'organization'],
+                
+                # Technical details
+                'cve_cwe': ['cvecwe', 'cve_cwe', 'cve', 'cwe'],
+                'cvss': ['cvss', 'cvss_score', 'cvssscore'],
+                'cvss_version': ['cvssversion', 'cvss_version_ref', 'cvss_version', 'cvss_ref'],
+                'cvss_vector': ['cvssvector', 'cvss_vector', 'vector'],
+                'affected_asset': ['affectedassetieipurlapplicationetc', 'affected_asset', 'target_asset', 'asset_ip'],
+                
+                # Vulnerability details
+                'title': ['observationvulnerabilitytitle', 'vulnerability_title', 'title', 'name'],
+                'description': ['detailedobservationvulnerablepoint', 'detailed_observation', 'description', 'details', 'vulnerable_point'],
+                'recommendation': ['vulnerabilityrecommendation', 'recommendation', 'recommendations', 'remediation', 'solution'],
+                'reference': ['reference', 'references', 'ref', 'links'],
+                
+                # Evidence/PoC
+                'evidence': ['evidenceproofofconceptscreenshot', 'evidence', 'proof_of_concept', 'poc', 'screenshot'],
+                
+                # Status fields
+                'severity': ['severity', 'risk', 'criticality', 'priority'],
+                'status': ['status', 'state', 'remediation_status'],
+                
+                # Count fields (for summary rows)
+                'critical': ['critical'],
+                'high': ['high'],
+                'medium': ['medium'],
+                'low': ['low'],
+                'informational': ['informational', 'info'],
+                'total': ['total']
             }
             
             # Try to find each field using aliases
@@ -103,8 +129,9 @@ def read_vulnerability_excel(file_path):
                     vuln_data[col] = str(row[col]) if pd.notna(row[col]) else ""
             
             vulnerabilities.append(vuln_data)
-            print(f"Row {idx + 1} data: {vuln_data}")
+            print(f"📄 Row {idx + 1}: Tester={vuln_data.get('tester_name','N/A')}, Project={vuln_data.get('project','N/A')}, Client={vuln_data.get('client','N/A')}, Title={vuln_data.get('title','N/A')[:50]}")
         
+        print(f"✅ Extracted {len(vulnerabilities)} rows from Excel")
         return vulnerabilities
     except Exception as e:
         print(f"Error reading vulnerability Excel: {e}")
@@ -561,12 +588,23 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         tools_software = json.loads(data.get('tools_software', '[]'))
         
         vulnerability_sections = []
+        client_name_from_excel = ''
+        project_name_from_excel = ''
         if vulnerability_data and poc_mapping is not None:
             vulnerability_sections = generate_vulnerability_sections(vulnerability_data, poc_mapping)
+            # Extract client/project from first vulnerability row if not provided in form
+            if vulnerability_data:
+                client_name_from_excel = vulnerability_data[0].get('client', '')
+                project_name_from_excel = vulnerability_data[0].get('project', '')
+                print(f"📊 Extracted from Excel - Client: {client_name_from_excel}, Project: {project_name_from_excel}")
+        
+        # Use form data as primary, fall back to Excel data
+        final_client_name = data.get('client_name', '') or client_name_from_excel
+        final_report_name = data.get('report_name', '') or project_name_from_excel
         
         context = {
-            'CLIENT_NAME': data.get('client_name', ''),
-            'REPORT_NAME': data.get('report_name', ''),
+            'CLIENT_NAME': final_client_name,
+            'REPORT_NAME': final_report_name,
             'REPORT_RELEASE_DATE': data.get('report_release_date', ''),
             'TYPE_OF_AUDIT': data.get('type_of_audit', ''),
             'TYPE_OF_AUDIT_REPORT': data.get('type_of_audit_report', ''),

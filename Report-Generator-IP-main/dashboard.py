@@ -14,13 +14,27 @@ import json
 dashboard_app = FastAPI(title="Complete Dashboard & Analytics", version="1.0.0")
 
 def extract_comprehensive_data_from_excel(file_path):
-    """Extract comprehensive employee and project data from Excel.
+    """Extract comprehensive employee and project data from Excel using standardized format.
     - Column detection is case-insensitive and tolerant to minor naming differences
-    - Supports either a single Severity column OR per-row count columns
-      (Critical/High/Medium/Low/Informational/Total)
+    - Supports the standardized Excel format with all fields
     """
     try:
-        df = pd.read_excel(file_path)
+        import sys
+        sys.path.insert(0, os.path.dirname(__file__))
+        from excel_parser import StandardExcelParser
+        
+        # Use the unified parser
+        parser = StandardExcelParser(file_path)
+        if not parser.load():
+            return {'error': 'Failed to load Excel file'}
+        
+        vulnerabilities = parser.extract_vulnerabilities()
+        employees = parser.extract_employee_data()
+        projects = parser.extract_project_data()
+        assets = parser.extract_asset_summary()
+        
+        # Build comprehensive data structure
+        df = parser.df
 
         # Build a normalized column name index for flexible lookups
         def _normalize(name: str) -> str:
