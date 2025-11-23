@@ -64,6 +64,7 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             "/csrf-refresh",
             "/type3/",
             "/type2/",
+            "/type4/",
             "/dashboard/"  # allow dashboard and API under it without session/CSRF
         ]
         return any(request.url.path.startswith(path) for path in skip_paths)
@@ -74,6 +75,7 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             "/type1/",
             # '/type2/' intentionally not protected to avoid breaking generator
             # '/type3/' intentionally not protected to allow generator without login
+            # '/type4/' intentionally not protected to allow generator without login
             # '/dashboard/' intentionally not protected for public dashboard access
             "/me"
         ]
