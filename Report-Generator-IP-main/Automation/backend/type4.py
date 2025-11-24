@@ -1301,8 +1301,8 @@ async def generate_report(
         # Parse the assessment file for document control data
         doc_control_data = parse_doc_control_excel(assessment_file_location)
         
-        # Use the CSS template v2.1 - use the template in the same directory as main.py
-        template_path = "CSS-NEW_Technical_Sample_Report_Automated_v2.1.docx"
+        # Use the CSS template v2.1 - use the template in the same directory as type4.py
+        template_path = os.path.join(os.path.dirname(__file__), "CSS-NEW_Technical_Sample_Report_Automated_v2.1.docx")
         report_filename = f"{client_name} VAPT Report {datetime.now().strftime('%Y-%d-%m')}.docx"
         output_path = os.path.join(UPLOAD_DIR, report_filename)
         
