@@ -1,4 +1,3 @@
-
 import os
 from dotenv import load_dotenv
 
@@ -78,10 +77,10 @@ async def auth_login(request: Request, email: Optional[str] = Form(default=None)
 @router.get("/auth/login")
 async def auth_login_get(request: Request, email: Optional[str] = None):
     if email:
-    try:
-        EmailForm(email=email)
-    except ValidationError:
-        raise HTTPException(status_code=400, detail="Invalid email address")
+        try:
+            EmailForm(email=email)
+        except ValidationError:
+            raise HTTPException(status_code=400, detail="Invalid email address")
     params = {
         "client_id": AZURE_CLIENT_ID,
         "response_type": "code",
@@ -248,3 +247,4 @@ def refresh_csrf_token_endpoint(request: Request):
     """Refresh CSRF token for current session (no auth required)."""
     token = refresh_csrf_token(request)
     return {"csrf_token": token}
+
