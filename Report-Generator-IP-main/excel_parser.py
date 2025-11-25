@@ -163,6 +163,9 @@ def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
     # Read the Excel file
     df = pd.read_excel(excel_file_path)
     
+    print(f"📊 Excel file loaded: {len(df)} rows, {len(df.columns)} columns")
+    print(f"📋 Available columns: {list(df.columns)}")
+    
     # Find all relevant columns
     col_asset = find_column(df, 'asset')
     col_instant_purpose = find_column(df, 'instant_purpose')
@@ -194,6 +197,15 @@ def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
     
     screenshot_cols = find_screenshot_columns(df)
     step_cols = find_step_columns(df)
+    
+    print(f"✅ Column mapping:")
+    print(f"   Observation: {col_observation}")
+    print(f"   Severity: {col_severity}")
+    print(f"   Tester: {col_tester}")
+    print(f"   Project: {col_project}")
+    print(f"   Client: {col_client}")
+    print(f"   Steps found: {len(step_cols)} ({list(step_cols.keys())})")
+    print(f"   Screenshots found: {len(screenshot_cols)}")
     
     # Extract metadata (from first row or most common values)
     metadata = {
@@ -235,6 +247,18 @@ def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
     
     # Extract vulnerability details
     vulnerabilities = []
+    
+    # Check if we have the observation column
+    if not col_observation:
+        print("⚠️ WARNING: 'Observation' column not found! Cannot extract vulnerabilities.")
+        print("   Looking for variations of: observation, title, vulnerability name, etc.")
+        print(f"   Please ensure your Excel has one of these column names (case-insensitive)")
+        return {
+            'metadata': metadata,
+            'assets': assets,
+            'vulnerabilities': [],
+            'raw_df': df
+        }
     
     for idx, row in df.iterrows():
         # Skip rows without observation/vulnerability title

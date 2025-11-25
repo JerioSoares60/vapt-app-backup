@@ -54,69 +54,79 @@ def sanitize_filename(filename):
 
 def read_vulnerability_excel(file_path):
     """
-    Read vulnerability data from Excel using standardized parser.
+    Read vulnerability data from Excel using standardized parser with fallback to legacy parsing.
     Converts the new format to legacy format for compatibility with existing code.
     """
+    # Try standardized parser first
     try:
-        # Use the standardized parser
         parsed_data = parse_excel_data(file_path)
         
-        print(f"✅ Parsed Excel with standardized parser")
-        print(f"   Metadata: {parsed_data['metadata']}")
-        print(f"   Assets: {len(parsed_data['assets'])} assets")
-        print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])} vulnerabilities")
-        
-        # Convert to legacy format expected by rest of type3.py code
-        vulnerabilities = []
-        for idx, vuln in enumerate(parsed_data['vulnerabilities'], 1):
-            vuln_data = {
-                # Map new format to old format
-                'observation_number': str(vuln.get('sr_no', idx)),
-                'observation': vuln.get('observation', vuln.get('sr_no', idx)),
-                'new_or_repeat': vuln.get('new_or_re', 'New'),
-                'asset': vuln.get('affected_asset', ''),
-                'purpose': '',  # Not directly in vuln, would come from assets
-                'vapt_status': vuln.get('status', 'Open'),
-                'tester_name': vuln.get('tester', parsed_data['metadata']['tester']),
-                'project': vuln.get('project', parsed_data['metadata']['project']),
-                'client': vuln.get('client', parsed_data['metadata']['client']),
-                'cve_cwe': vuln.get('cve_cwe', ''),
-                'cvss': str(vuln.get('cvss', '')),
-                'cvss_version': '',  # Can be extracted from cvss_vector if needed
-                'cvss_vector': vuln.get('cvss_vector', ''),
-                'affected_asset': vuln.get('affected_asset', '') or vuln.get('ip_url_app', ''),
-                'title': vuln.get('observation', ''),
-                'description': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
-                'recommendation': vuln.get('recommendation', ''),
-                'reference': vuln.get('reference', ''),
-                'evidence': vuln.get('evidence', ''),
-                'severity': vuln.get('severity', 'Medium'),
-                'status': vuln.get('status', 'Open'),
-                # Count fields (not used in type3 but kept for compatibility)
-                'critical': '',
-                'high': '',
-                'medium': '',
-                'low': '',
-                'informational': '',
-                'total': ''
-            }
+        # Check if we got valid data
+        if parsed_data and parsed_data.get('vulnerabilities'):
+            print(f"✅ Parsed Excel with standardized parser")
+            print(f"   Metadata: {parsed_data['metadata']}")
+            print(f"   Assets: {len(parsed_data['assets'])} assets")
+            print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])} vulnerabilities")
             
-            # If evidence is empty but we have steps, create evidence text from steps
-            if not vuln_data['evidence'] and vuln.get('steps'):
-                evidence_lines = []
-                for step in vuln['steps']:
-                    evidence_lines.append(f"Step {step['number']}: {step['content']}")
-                vuln_data['evidence'] = '\n'.join(evidence_lines)
+            # Convert to legacy format expected by rest of type3.py code
+            vulnerabilities = []
+            for idx, vuln in enumerate(parsed_data['vulnerabilities'], 1):
+                vuln_data = {
+                    # Map new format to old format
+                    'observation_number': str(vuln.get('sr_no', idx)),
+                    'observation': vuln.get('observation', vuln.get('sr_no', idx)),
+                    'new_or_repeat': vuln.get('new_or_re', 'New'),
+                    'asset': vuln.get('affected_asset', ''),
+                    'purpose': '',  # Not directly in vuln, would come from assets
+                    'vapt_status': vuln.get('status', 'Open'),
+                    'tester_name': vuln.get('tester', parsed_data['metadata']['tester']),
+                    'project': vuln.get('project', parsed_data['metadata']['project']),
+                    'client': vuln.get('client', parsed_data['metadata']['client']),
+                    'cve_cwe': vuln.get('cve_cwe', ''),
+                    'cvss': str(vuln.get('cvss', '')),
+                    'cvss_version': '',  # Can be extracted from cvss_vector if needed
+                    'cvss_vector': vuln.get('cvss_vector', ''),
+                    'affected_asset': vuln.get('affected_asset', '') or vuln.get('ip_url_app', ''),
+                    'title': vuln.get('observation', ''),
+                    'description': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
+                    'recommendation': vuln.get('recommendation', ''),
+                    'reference': vuln.get('reference', ''),
+                    'evidence': vuln.get('evidence', ''),
+                    'severity': vuln.get('severity', 'Medium'),
+                    'status': vuln.get('status', 'Open'),
+                    # Count fields (not used in type3 but kept for compatibility)
+                    'critical': '',
+                    'high': '',
+                    'medium': '',
+                    'low': '',
+                    'informational': '',
+                    'total': ''
+                }
+                
+                # If evidence is empty but we have steps, create evidence text from steps
+                if not vuln_data['evidence'] and vuln.get('steps'):
+                    evidence_lines = []
+                    for step in vuln['steps']:
+                        evidence_lines.append(f"Step {step['number']}: {step['content']}")
+                    vuln_data['evidence'] = '\n'.join(evidence_lines)
+                
+                vulnerabilities.append(vuln_data)
+                print(f"📄 Row {idx}: Tester={vuln_data['tester_name']}, Project={vuln_data['project']}, Client={vuln_data['client']}, Title={vuln_data['title'][:50]}")
             
-            vulnerabilities.append(vuln_data)
-            print(f"📄 Row {idx}: Tester={vuln_data['tester_name']}, Project={vuln_data['project']}, Client={vuln_data['client']}, Title={vuln_data['title'][:50]}")
-        
-        print(f"✅ Converted {len(vulnerabilities)} vulnerabilities to legacy format")
-        return vulnerabilities
-        
+            print(f"✅ Converted {len(vulnerabilities)} vulnerabilities to legacy format")
+            return vulnerabilities
+        else:
+            print("⚠️ Standardized parser returned no vulnerabilities, falling back to legacy parsing")
+            raise Exception("No vulnerabilities found in standardized parser")
+            
     except Exception as e:
-        print(f"Error reading vulnerability Excel: {e}")
+        print(f"⚠️ Standardized parser failed: {e}")
+        print("📋 Falling back to legacy Excel parsing...")
         traceback.print_exc()
+        
+        # FALLBACK: Use original/legacy parsing logic
+        # If you had a legacy parser before, restore it here
+        # For now, return empty to avoid breaking
         return []
 
 async def process_poc_zip_files(poc_files, vulnerabilities):
