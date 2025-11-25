@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request, Dep
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import sys
 import pandas as pd
 from docxtpl import DocxTemplate, InlineImage
 from docx import Document
@@ -33,6 +34,10 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
     print("Warning: PIL/Pillow library not available. Logo resizing will be disabled.")
+
+# Add parent directory to path to import excel_parser
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from excel_parser import parse_excel_data, format_for_template
 
 # Version tracking for code changes
 # Format: MAJOR.MINOR.PATCH
@@ -231,11 +236,67 @@ def normalize_filename(fname):
 # Function to parse the uploaded Excel file for vulnerability data
 def parse_vulnerabilities_excel(file_path):
     """
-    Parse the uploaded Excel file and return a list of vulnerability data.
+    Parse the uploaded Excel file using standardized parser and convert to legacy format.
     This function focuses only on vulnerability details and excludes document control info.
     """
     print(f"Parsing vulnerability data from: {file_path}")
     try:
+        # Try to use standardized parser first
+        try:
+            parsed_data = parse_excel_data(file_path)
+            print(f"✅ Using standardized Excel parser")
+            print(f"   Metadata: {parsed_data['metadata']}")
+            print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])}")
+            
+            vulnerabilities = []
+            for index, vuln in enumerate(parsed_data['vulnerabilities']):
+                # Convert steps to steps_with_screenshots format
+                steps_with_screenshots = []
+                if vuln.get('steps'):
+                    for step in vuln['steps']:
+                        steps_with_screenshots.append({
+                            'text': step['content'],
+                            'screenshot': ''  # Screenshots handled separately via PoC mapping
+                        })
+                
+                # Extract CVE/CWE list
+                associated_cves = []
+                cve_cwe_str = vuln.get('cve_cwe', '')
+                if cve_cwe_str:
+                    associated_cves = [c.strip() for c in re.split(r'[\n,;]', cve_cwe_str) if c.strip()]
+                
+                # Convert to type2 format
+                vulnerability = {
+                    'name': vuln.get('observation', ''),
+                    'description': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
+                    'impact': '',  # Not in standardized format, will be generated
+                    'severity': vuln.get('severity', 'Medium'),
+                    'cvss': vuln.get('cvss', None),
+                    'ip': vuln.get('affected_asset', '') or vuln.get('ip_url_app', ''),
+                    'vulnerable_parameter': '',  # Not in standardized format
+                    'remediation': vuln.get('recommendation', ''),
+                    'steps_with_screenshots': steps_with_screenshots,
+                    'sr_no': str(vuln.get('sr_no', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
+                    'associated_cves': associated_cves,
+                    'reference_link': vuln.get('reference', ''),
+                    'reported_by': vuln.get('tester', parsed_data['metadata']['tester']),
+                    'project': vuln.get('project', parsed_data['metadata']['project']),
+                    'severity_level': vuln.get('severity', 'Medium'),
+                    'is_no_vuln_box': False,
+                    'row_order': int(index),
+                }
+                
+                vulnerabilities.append(vulnerability)
+                print(f"Parsed vulnerability Sr No: {vulnerability['sr_no']} at index {index}")
+            
+            print(f"Total vulnerabilities extracted (standardized parser): {len(vulnerabilities)}")
+            return vulnerabilities
+            
+        except Exception as std_parse_error:
+            print(f"⚠️  Standardized parser failed, falling back to legacy parser: {std_parse_error}")
+            traceback.print_exc()
+        
+        # Fallback to original parsing logic
         df = pd.read_excel(file_path)
         print(f"Vulnerability Excel file read successfully. Columns: {df.columns.tolist()}")
         print(f"Excel file has {len(df)} rows")

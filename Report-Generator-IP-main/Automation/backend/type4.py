@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import sys
 import pandas as pd
 from docxtpl import DocxTemplate, InlineImage
 from docx import Document
@@ -31,6 +32,10 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
     print("Warning: PIL/Pillow library not available. Logo resizing will be disabled.")
+
+# Add parent directory to path to import excel_parser
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from excel_parser import parse_excel_data, format_for_template
 
 # Version tracking for code changes
 # Format: MAJOR.MINOR.PATCH
@@ -218,12 +223,76 @@ def normalize_filename(fname):
 # Function to parse the uploaded Excel file for vulnerability data
 def parse_vulnerabilities_excel(file_path):
     """
-    Parse the uploaded Excel file and return a list of vulnerability data along with
-    any metadata (currently the engagement URL on row 4).
+    Parse the uploaded Excel file using standardized parser and return vulnerability data.
+    Returns (vulnerabilities_list, metadata_dict)
     """
     print(f"Parsing vulnerability data from: {file_path}")
-    engagement_url = ""
+    
     try:
+        # Try to use standardized parser first
+        try:
+            parsed_data = parse_excel_data(file_path)
+            print(f"✅ Using standardized Excel parser")
+            print(f"   Metadata: {parsed_data['metadata']}")
+            print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])}")
+            
+            vulnerabilities = []
+            for index, vuln in enumerate(parsed_data['vulnerabilities']):
+                # Convert steps to steps_with_screenshots format
+                steps_with_screenshots = []
+                if vuln.get('steps'):
+                    for step in vuln['steps']:
+                        steps_with_screenshots.append({
+                            'text': step['content'],
+                            'screenshot': vuln['screenshots'][step['number']-1] if len(vuln.get('screenshots', [])) >= step['number'] else ''
+                        })
+                
+                # Convert to type4 format
+                cvss_score = vuln.get('cvss', None)
+                try:
+                    if cvss_score:
+                        cvss_score = float(cvss_score)
+                except:
+                    cvss_score = None
+                
+                severity = vuln.get('severity', 'Medium')
+                
+                vulnerability = {
+                    'name': vuln.get('observation', ''),
+                    'description': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
+                    'impact': '',  # Not in standardized format
+                    'severity': severity,
+                    'severity_display': severity,
+                    'cvss': cvss_score,
+                    'vulnerable_url': vuln.get('ip_url_app', ''),
+                    'vulnerable_parameter': '',  # Not in standardized format
+                    'remediation': vuln.get('recommendation', ''),
+                    'steps_with_screenshots': steps_with_screenshots,
+                    'sr_no': str(vuln.get('sr_no', f"{index+1}")),
+                    'reference_link': vuln.get('reference', ''),
+                    'cwe_id': vuln.get('cve_cwe', ''),
+                }
+                
+                vulnerabilities.append(vulnerability)
+                print(f"Parsed vulnerability Sr No: {vulnerability['sr_no']} at index {index}")
+            
+            # Return vulnerabilities and metadata
+            vuln_metadata = {
+                'engagement_url': '',  # Not in standardized format yet
+                'client': parsed_data['metadata']['client'],
+                'project': parsed_data['metadata']['project'],
+                'tester': parsed_data['metadata']['tester']
+            }
+            
+            print(f"Total vulnerabilities extracted (standardized parser): {len(vulnerabilities)}")
+            return vulnerabilities, vuln_metadata
+            
+        except Exception as std_parse_error:
+            print(f"⚠️  Standardized parser failed, falling back to legacy parser: {std_parse_error}")
+            traceback.print_exc()
+    
+        # Fallback to original parsing logic
+        engagement_url = ""
         # Read the first four rows without headers to capture the URL on row 4
         preview_df = pd.read_excel(file_path, header=None, nrows=4)
         if preview_df.shape[0] >= 4 and preview_df.shape[1] >= 2:

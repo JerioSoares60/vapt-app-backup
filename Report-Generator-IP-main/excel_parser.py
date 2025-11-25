@@ -1,384 +1,382 @@
 """
-Unified Excel Parser for all Report Generators
-Handles the standardized Excel format with flexible column matching
+Unified Excel Parser for Standardized VAPT Report Format
+This module provides a single source of truth for parsing the standardized Excel format
+used across all report generators (main.py, type2.py, type3.py, type4.py)
 """
+
 import pandas as pd
-import os
-from typing import Dict, List, Any, Optional
 import re
+from typing import Dict, List, Any, Optional, Tuple
+import os
 
 
-class StandardExcelParser:
+def normalize_column_name(col: str) -> str:
     """
-    Parser for standardized Excel format used across all report generators.
-    Supports flexible column matching with case-insensitive detection.
+    Normalize column names for flexible matching.
+    Converts to lowercase, removes extra spaces, and standardizes separators.
     """
+    if not isinstance(col, str):
+        return str(col).lower().strip()
     
-    def __init__(self, file_path: str):
-        self.file_path = file_path
-        self.df = None
-        self.column_map = {}
-        
-    def _normalize_column_name(self, name: str) -> str:
-        """Normalize column name for matching (lowercase, no spaces/special chars)"""
-        return ''.join(ch.lower() for ch in str(name).strip() if ch.isalnum())
+    # Remove extra whitespace and convert to lowercase
+    normalized = ' '.join(col.lower().strip().split())
     
-    def _find_column(self, candidates: List[str]) -> Optional[str]:
-        """Find first matching column from candidates list"""
-        normalized_map = {self._normalize_column_name(col): col for col in self.df.columns}
-        
-        for candidate in candidates:
-            normalized = self._normalize_column_name(candidate)
-            if normalized in normalized_map:
-                return normalized_map[normalized]
-        
-        # Try partial match (startswith)
-        for real_col in self.df.columns:
-            normalized_real = self._normalize_column_name(real_col)
-            for candidate in candidates:
-                normalized_cand = self._normalize_column_name(candidate)
-                if normalized_real.startswith(normalized_cand) or normalized_cand.startswith(normalized_real):
-                    return real_col
-        
+    # Replace common separators with space
+    normalized = normalized.replace('_', ' ').replace('-', ' ').replace('/', ' ')
+    
+    return normalized
+
+
+# Column mapping dictionary - maps various possible column names to standard keys
+COLUMN_MAPPINGS = {
+    # Asset Information
+    'asset': ['asset', 'hostname', 'asset hostname', 'asset/hostname', 'host'],
+    'instant_purpose': ['instant purpose', 'purpose', 'asset purpose'],
+    'vapt_status': ['vapt status', 'status', 'assessment status'],
+    
+    # Severity Counts (for asset-level summary)
+    'critical_count': ['critical', 'critical count'],
+    'high_count': ['high', 'high count'],
+    'medium_count': ['medium', 'medium count'],
+    'low_count': ['low', 'low count'],
+    'informational_count': ['informational', 'info', 'informational count'],
+    'total_count': ['total', 'total count', 'total vulnerabilities'],
+    
+    # Tester and Project Information
+    'tester_name': ['tester name', 'tester', 'auditor', 'auditor name', 'tested by'],
+    'project': ['project', 'project name', 'engagement'],
+    'client': ['client', 'client name', 'organization'],
+    
+    # Vulnerability Details
+    'sr_no': ['sr no', 'sr.no', 'sr.no.', 'serial no', 'serial number', 's.no', 's no', 'no', '#'],
+    'observation': ['observation', 'title', 'vulnerability name', 'vuln name', 'finding'],
+    'severity': ['severity', 'risk', 'risk level', 'impact'],
+    'status': ['status', 'vuln status', 'finding status'],
+    'new_or_re': ['new or re', 'new re', 'type', 'finding type'],
+    'cve_cwe': ['cve cwe', 'cve/cwe', 'cve', 'cwe', 'identifier'],
+    'cvss': ['cvss', 'cvss score', 'score'],
+    'cvss_vector': ['cvss vector', 'cvss string', 'vector'],
+    'affected_asset': ['affected asset', 'affected system', 'vulnerable asset'],
+    'ip_url_app': ['ip url app', 'ip/url/app', 'target', 'endpoint', 'url', 'ip'],
+    'observation_vuln': ['observation vulnerability', 'observation/vulnerability', 'description', 'summary'],
+    'detailed_observation': ['detailed observation vulnerability', 'detailed observation', 'detailed description', 'details'],
+    'recommendation': ['recommendation', 'remediation', 'fix', 'solution', 'mitigation'],
+    'reference': ['reference', 'references', 'links', 'external references'],
+    'evidence': ['evidence proof of concept', 'evidence', 'proof of concept', 'poc', 'evidence / proof of concept'],
+    
+    # Screenshot columns (dynamic - can be multiple)
+    'screenshot': ['screenshot', 'screen shot', 'image', 'poc image'],
+    
+    # Steps columns (for detailed reproduction steps)
+    'step_1': ['step 1', 'step1', 'steps 1'],
+    'step_2': ['step 2', 'step2', 'steps 2'],
+    'step_3': ['step 3', 'step3', 'steps 3'],
+    'step_4': ['step 4', 'step4', 'steps 4'],
+    'step_5': ['step 5', 'step5', 'steps 5'],
+    'step_6': ['step 6', 'step6', 'steps 6'],
+    'step_7': ['step 7', 'step7', 'steps 7'],
+    'step_8': ['step 8', 'step8', 'steps 8'],
+    'step_9': ['step 9', 'step9', 'steps 9'],
+}
+
+
+def find_column(df: pd.DataFrame, standard_key: str) -> Optional[str]:
+    """
+    Find the actual column name in the DataFrame that matches the standard key.
+    Returns the actual column name from the DataFrame, or None if not found.
+    """
+    if standard_key not in COLUMN_MAPPINGS:
         return None
     
-    def load(self) -> bool:
-        """Load and parse Excel file"""
-        try:
-            self.df = pd.read_excel(self.file_path)
-            self._build_column_map()
-            return True
-        except Exception as e:
-            print(f"Error loading Excel file: {e}")
-            return False
+    possible_names = COLUMN_MAPPINGS[standard_key]
+    df_columns_normalized = {normalize_column_name(col): col for col in df.columns}
     
-    def _build_column_map(self):
-        """Build mapping of standard column names to actual column names in Excel"""
-        # Define column aliases
-        column_definitions = {
-            'asset': ['Asset/Hostname', 'Asset Hostname', 'Asset_Hostname', 'Hostname', 'Asset', 'URL', 'IP', 'Target'],
-            'purpose': ['Instant purpose', 'Instant Purpose', 'Purpose', 'Asset_Purpose', 'Application_Type'],
-            'vapt_status': ['VAPT Status', 'VAPT_Status', 'Assessment_Status', 'Status Column', 'Overall_Status'],
-            'severity_status': ['Severity Status', 'Severity_Status', 'Status_Summary'],
-            'tester_name': ['Tester_Name', 'Tester Name', 'ReportedBy', 'Tester', 'Employee_Name', 'Analyst'],
-            'project': ['Project', 'Project_Name', 'Project Name', 'ProjectName', 'Assessment'],
-            'client': ['Client_Name', 'Client Name', 'ClientName', 'Client', 'Organization'],
-            'sr_no': ['Sr.no.', 'Sr no', 'Sr_no', 'Serial_No', 'S.No', 'S No', 'Number', '#'],
-            'observation': ['Observation', 'Observation_ID', 'ID', 'Vuln_ID'],
-            'severity': ['Severity', 'Risk', 'Risk Level', 'Risk_Level', 'Priority'],
-            'status': ['Status', 'Remediation_Status', 'Fix_Status'],
-            'new_or_re': ['New or Re', 'New_or_Re', 'Type', 'Test_Type'],
-            'cve_cwe': ['CVE/CWE', 'CVE', 'CWE', 'CVE_CWE'],
-            'cvss': ['CVSS', 'CVSS Score', 'CVSS_Score'],
-            'cvss_vector': ['CVSS Vector', 'CVSS_Vector', 'Vector'],
-            'affected_asset': ['Affected Asset ie. IP/URL/Application etc.', 'Affected Asset', 'Affected_Asset', 'Target'],
-            'vulnerability_title': ['Observation/Vulnerability Title', 'Vulnerability Title', 'Title', 'Vulnerability_Name', 'Vulnerability Name'],
-            'detailed_observation': ['Detailed Observation/Vulnerable Point', 'Detailed Observation', 'Description', 'Vulnerability_Description', 'Vulnerable_Point'],
-            'recommendation': ['Vulnerability Recommendation', 'Recommendation', 'Remediation', 'Solution', 'Fix'],
-            'reference': ['Reference', 'References', 'Links', 'URL', 'External_Links'],
-            'critical_count': ['Critical'],
-            'high_count': ['High'],
-            'medium_count': ['Medium'],
-            'low_count': ['Low'],
-            'info_count': ['Informational', 'Info'],
-            'total_count': ['Total'],
-            'date': ['Date', 'Created_Date', 'Created Date', 'Reported_Date', 'Assessment_Date']
+    for possible_name in possible_names:
+        normalized_possible = normalize_column_name(possible_name)
+        if normalized_possible in df_columns_normalized:
+            return df_columns_normalized[normalized_possible]
+    
+    return None
+
+
+def find_screenshot_columns(df: pd.DataFrame) -> List[str]:
+    """
+    Find all screenshot columns in the DataFrame.
+    Returns a list of actual column names that contain screenshots.
+    """
+    screenshot_cols = []
+    for col in df.columns:
+        normalized = normalize_column_name(col)
+        if 'screenshot' in normalized or 'screen shot' in normalized or 'image' in normalized:
+            screenshot_cols.append(col)
+    
+    return screenshot_cols
+
+
+def find_step_columns(df: pd.DataFrame) -> Dict[int, str]:
+    """
+    Find all step columns in the DataFrame.
+    Returns a dictionary mapping step numbers to actual column names.
+    """
+    step_cols = {}
+    for col in df.columns:
+        normalized = normalize_column_name(col)
+        # Match patterns like "step 1", "step1", "steps 1", etc.
+        match = re.search(r'step\s*(\d+)', normalized)
+        if match:
+            step_num = int(match.group(1))
+            step_cols[step_num] = col
+    
+    return step_cols
+
+
+def safe_get_value(row: pd.Series, col_name: Optional[str], default: Any = '') -> Any:
+    """
+    Safely get a value from a row, handling None column names and NaN values.
+    """
+    if col_name is None:
+        return default
+    
+    if col_name not in row.index:
+        return default
+    
+    value = row[col_name]
+    
+    # Handle NaN, None, and empty strings
+    if pd.isna(value) or value is None or (isinstance(value, str) and value.strip() == ''):
+        return default
+    
+    return value
+
+
+def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
+    """
+    Parse the standardized Excel format and extract all relevant data.
+    
+    Returns a dictionary containing:
+    - metadata: Dict with client, project, tester info
+    - assets: List of asset summaries with vulnerability counts
+    - vulnerabilities: List of detailed vulnerability information
+    - raw_df: The original DataFrame for custom processing
+    """
+    
+    # Read the Excel file
+    df = pd.read_excel(excel_file_path)
+    
+    # Find all relevant columns
+    col_asset = find_column(df, 'asset')
+    col_instant_purpose = find_column(df, 'instant_purpose')
+    col_vapt_status = find_column(df, 'vapt_status')
+    col_critical = find_column(df, 'critical_count')
+    col_high = find_column(df, 'high_count')
+    col_medium = find_column(df, 'medium_count')
+    col_low = find_column(df, 'low_count')
+    col_info = find_column(df, 'informational_count')
+    col_total = find_column(df, 'total_count')
+    col_tester = find_column(df, 'tester_name')
+    col_project = find_column(df, 'project')
+    col_client = find_column(df, 'client')
+    col_sr_no = find_column(df, 'sr_no')
+    col_observation = find_column(df, 'observation')
+    col_severity = find_column(df, 'severity')
+    col_status = find_column(df, 'status')
+    col_new_or_re = find_column(df, 'new_or_re')
+    col_cve_cwe = find_column(df, 'cve_cwe')
+    col_cvss = find_column(df, 'cvss')
+    col_cvss_vector = find_column(df, 'cvss_vector')
+    col_affected_asset = find_column(df, 'affected_asset')
+    col_ip_url = find_column(df, 'ip_url_app')
+    col_obs_vuln = find_column(df, 'observation_vuln')
+    col_detailed_obs = find_column(df, 'detailed_observation')
+    col_recommendation = find_column(df, 'recommendation')
+    col_reference = find_column(df, 'reference')
+    col_evidence = find_column(df, 'evidence')
+    
+    screenshot_cols = find_screenshot_columns(df)
+    step_cols = find_step_columns(df)
+    
+    # Extract metadata (from first row or most common values)
+    metadata = {
+        'client': safe_get_value(df.iloc[0], col_client, 'Client Name') if col_client else 'Client Name',
+        'project': safe_get_value(df.iloc[0], col_project, 'Project Name') if col_project else 'Project Name',
+        'tester': safe_get_value(df.iloc[0], col_tester, 'Tester Name') if col_tester else 'Tester Name',
+    }
+    
+    # If metadata is empty in first row, try to find first non-empty value
+    for key in ['client', 'project', 'tester']:
+        if metadata[key] in ['', 'Client Name', 'Project Name', 'Tester Name']:
+            col_name = col_client if key == 'client' else (col_project if key == 'project' else col_tester)
+            if col_name:
+                for _, row in df.iterrows():
+                    val = safe_get_value(row, col_name)
+                    if val and val != '':
+                        metadata[key] = val
+                        break
+    
+    # Extract asset-level summaries
+    assets = []
+    seen_assets = set()
+    
+    for _, row in df.iterrows():
+        asset_name = safe_get_value(row, col_asset)
+        if asset_name and asset_name not in seen_assets:
+            seen_assets.add(asset_name)
+            assets.append({
+                'asset': asset_name,
+                'purpose': safe_get_value(row, col_instant_purpose),
+                'status': safe_get_value(row, col_vapt_status),
+                'critical': safe_get_value(row, col_critical, 0),
+                'high': safe_get_value(row, col_high, 0),
+                'medium': safe_get_value(row, col_medium, 0),
+                'low': safe_get_value(row, col_low, 0),
+                'informational': safe_get_value(row, col_info, 0),
+                'total': safe_get_value(row, col_total, 0),
+            })
+    
+    # Extract vulnerability details
+    vulnerabilities = []
+    
+    for idx, row in df.iterrows():
+        # Skip rows without observation/vulnerability title
+        obs_title = safe_get_value(row, col_observation)
+        if not obs_title or obs_title == '':
+            continue
+        
+        # Extract steps
+        steps = []
+        for step_num in sorted(step_cols.keys()):
+            step_content = safe_get_value(row, step_cols[step_num])
+            if step_content and step_content != '':
+                steps.append({
+                    'number': step_num,
+                    'content': step_content
+                })
+        
+        # Extract screenshots
+        screenshots = []
+        for screenshot_col in screenshot_cols:
+            screenshot_val = safe_get_value(row, screenshot_col)
+            if screenshot_val and screenshot_val != '':
+                screenshots.append(screenshot_val)
+        
+        vuln = {
+            'sr_no': safe_get_value(row, col_sr_no, idx + 1),
+            'observation': obs_title,
+            'severity': safe_get_value(row, col_severity, 'Medium'),
+            'status': safe_get_value(row, col_status, 'Open'),
+            'new_or_re': safe_get_value(row, col_new_or_re, 'New'),
+            'cve_cwe': safe_get_value(row, col_cve_cwe),
+            'cvss': safe_get_value(row, col_cvss),
+            'cvss_vector': safe_get_value(row, col_cvss_vector),
+            'affected_asset': safe_get_value(row, col_affected_asset),
+            'ip_url_app': safe_get_value(row, col_ip_url),
+            'observation_summary': safe_get_value(row, col_obs_vuln),
+            'detailed_observation': safe_get_value(row, col_detailed_obs),
+            'recommendation': safe_get_value(row, col_recommendation),
+            'reference': safe_get_value(row, col_reference),
+            'evidence': safe_get_value(row, col_evidence),
+            'steps': steps,
+            'screenshots': screenshots,
+            'tester': safe_get_value(row, col_tester, metadata['tester']),
+            'project': safe_get_value(row, col_project, metadata['project']),
+            'client': safe_get_value(row, col_client, metadata['client']),
         }
         
-        # Build the column map
-        for key, candidates in column_definitions.items():
-            found_col = self._find_column(candidates)
-            if found_col:
-                self.column_map[key] = found_col
-        
-        # Find step columns (Evidence/PoC columns)
-        self.column_map['steps'] = []
-        for col in self.df.columns:
-            col_lower = str(col).lower()
-            if any(keyword in col_lower for keyword in ['evidence', 'proof', 'screenshot', 'poc', 'step']):
-                # Check if it's a step column (might be numbered)
-                self.column_map['steps'].append(col)
-        
-        print(f"✅ Mapped columns: {list(self.column_map.keys())}")
-    
-    def get_value(self, row, key: str, default=''):
-        """Get value from row using column map"""
-        if key not in self.column_map:
-            return default
-        
-        col_name = self.column_map[key]
-        value = row.get(col_name, default)
-        
-        # Handle NaN and None
-        if pd.isna(value):
-            return default
-        
-        return str(value).strip()
-    
-    def extract_vulnerabilities(self) -> List[Dict[str, Any]]:
-        """Extract vulnerability data from Excel"""
-        vulnerabilities = []
-        
-        for idx, row in self.df.iterrows():
-            # Skip rows where observation/sr_no is empty
-            sr_no = self.get_value(row, 'sr_no')
-            observation = self.get_value(row, 'observation')
-            
-            if not sr_no and not observation:
-                continue
-            
-            # Extract steps (Evidence/PoC)
-            steps = []
-            if 'steps' in self.column_map:
-                for step_col in self.column_map['steps']:
-                    step_value = row.get(step_col, '')
-                    if pd.notna(step_value) and str(step_value).strip():
-                        steps.append({
-                            'step_name': step_col,
-                            'step_content': str(step_value).strip()
-                        })
-            
-            vuln = {
-                # Basic identification
-                'sr_no': sr_no or str(idx + 1),
-                'observation': observation,
-                'severity': self.get_value(row, 'severity', 'Medium'),
-                'status': self.get_value(row, 'status', 'Open'),
-                'new_or_re': self.get_value(row, 'new_or_re'),
-                
-                # Asset and project info
-                'asset': self.get_value(row, 'asset'),
-                'purpose': self.get_value(row, 'purpose'),
-                'vapt_status': self.get_value(row, 'vapt_status'),
-                'tester_name': self.get_value(row, 'tester_name'),
-                'project': self.get_value(row, 'project'),
-                'client': self.get_value(row, 'client'),
-                'date': self.get_value(row, 'date'),
-                
-                # Technical details
-                'cve_cwe': self.get_value(row, 'cve_cwe'),
-                'cvss': self.get_value(row, 'cvss', '0.0'),
-                'cvss_vector': self.get_value(row, 'cvss_vector'),
-                'affected_asset': self.get_value(row, 'affected_asset'),
-                
-                # Vulnerability details
-                'vulnerability_title': self.get_value(row, 'vulnerability_title'),
-                'detailed_observation': self.get_value(row, 'detailed_observation'),
-                'recommendation': self.get_value(row, 'recommendation'),
-                'reference': self.get_value(row, 'reference'),
-                
-                # Evidence/PoC steps
-                'steps': steps,
-                'has_steps': len(steps) > 0,
-                
-                # Counts (if available)
-                'critical_count': self.get_value(row, 'critical_count', '0'),
-                'high_count': self.get_value(row, 'high_count', '0'),
-                'medium_count': self.get_value(row, 'medium_count', '0'),
-                'low_count': self.get_value(row, 'low_count', '0'),
-                'info_count': self.get_value(row, 'info_count', '0'),
-                'total_count': self.get_value(row, 'total_count', '0'),
-            }
-            
-            vulnerabilities.append(vuln)
-        
-        return vulnerabilities
-    
-    def extract_employee_data(self) -> List[Dict[str, Any]]:
-        """Extract employee/tester data for dashboard"""
-        employees = {}
-        
-        for _, row in self.df.iterrows():
-            tester_name = self.get_value(row, 'tester_name')
-            if not tester_name or tester_name == '':
-                continue
-            
-            if tester_name not in employees:
-                employees[tester_name] = {
-                    'name': tester_name,
-                    'total_vulnerabilities': 0,
-                    'critical': 0,
-                    'high': 0,
-                    'medium': 0,
-                    'low': 0,
-                    'info': 0,
-                    'projects': set(),
-                    'clients': set()
-                }
-            
-            employees[tester_name]['total_vulnerabilities'] += 1
-            
-            # Count by severity
-            severity = self.get_value(row, 'severity', '').lower()
-            if 'critical' in severity:
-                employees[tester_name]['critical'] += 1
-            elif 'high' in severity:
-                employees[tester_name]['high'] += 1
-            elif 'medium' in severity:
-                employees[tester_name]['medium'] += 1
-            elif 'low' in severity:
-                employees[tester_name]['low'] += 1
-            else:
-                employees[tester_name]['info'] += 1
-            
-            # Track projects and clients
-            project = self.get_value(row, 'project')
-            client = self.get_value(row, 'client')
-            if project:
-                employees[tester_name]['projects'].add(project)
-            if client:
-                employees[tester_name]['clients'].add(client)
-        
-        # Convert sets to lists for JSON serialization
-        for emp_data in employees.values():
-            emp_data['projects'] = list(emp_data['projects'])
-            emp_data['clients'] = list(emp_data['clients'])
-        
-        return list(employees.values())
-    
-    def extract_project_data(self) -> List[Dict[str, Any]]:
-        """Extract project data for dashboard"""
-        projects = {}
-        
-        for _, row in self.df.iterrows():
-            project = self.get_value(row, 'project')
-            if not project or project == '':
-                continue
-            
-            if project not in projects:
-                projects[project] = {
-                    'name': project,
-                    'client': self.get_value(row, 'client'),
-                    'total_vulnerabilities': 0,
-                    'critical': 0,
-                    'high': 0,
-                    'medium': 0,
-                    'low': 0,
-                    'info': 0,
-                    'assets': set(),
-                    'testers': set()
-                }
-            
-            projects[project]['total_vulnerabilities'] += 1
-            
-            # Count by severity
-            severity = self.get_value(row, 'severity', '').lower()
-            if 'critical' in severity:
-                projects[project]['critical'] += 1
-            elif 'high' in severity:
-                projects[project]['high'] += 1
-            elif 'medium' in severity:
-                projects[project]['medium'] += 1
-            elif 'low' in severity:
-                projects[project]['low'] += 1
-            else:
-                projects[project]['info'] += 1
-            
-            # Track assets and testers
-            asset = self.get_value(row, 'asset')
-            tester = self.get_value(row, 'tester_name')
-            if asset:
-                projects[project]['assets'].add(asset)
-            if tester:
-                projects[project]['testers'].add(tester)
-        
-        # Convert sets to lists
-        for proj_data in projects.values():
-            proj_data['assets'] = list(proj_data['assets'])
-            proj_data['testers'] = list(proj_data['testers'])
-        
-        return list(projects.values())
-    
-    def extract_asset_summary(self) -> List[Dict[str, Any]]:
-        """Extract asset summary for dashboard table"""
-        assets = {}
-        
-        for _, row in self.df.iterrows():
-            asset = self.get_value(row, 'asset')
-            if not asset or asset == '':
-                continue
-            
-            if asset not in assets:
-                assets[asset] = {
-                    'asset': asset,
-                    'purpose': self.get_value(row, 'purpose'),
-                    'vapt_status': self.get_value(row, 'vapt_status'),
-                    'severity_status': self.get_value(row, 'severity_status'),
-                    'critical': 0,
-                    'high': 0,
-                    'medium': 0,
-                    'low': 0,
-                    'info': 0,
-                    'total': 0,
-                    'tester': self.get_value(row, 'tester_name'),
-                    'project': self.get_value(row, 'project'),
-                    'client': self.get_value(row, 'client')
-                }
-            
-            # Check if row has count columns or needs to be counted
-            if self.column_map.get('critical_count'):
-                # Use count columns if available
-                assets[asset]['critical'] += int(self.get_value(row, 'critical_count', '0') or 0)
-                assets[asset]['high'] += int(self.get_value(row, 'high_count', '0') or 0)
-                assets[asset]['medium'] += int(self.get_value(row, 'medium_count', '0') or 0)
-                assets[asset]['low'] += int(self.get_value(row, 'low_count', '0') or 0)
-                assets[asset]['info'] += int(self.get_value(row, 'info_count', '0') or 0)
-                assets[asset]['total'] += int(self.get_value(row, 'total_count', '0') or 0)
-            else:
-                # Count by severity if no count columns
-                severity = self.get_value(row, 'severity', '').lower()
-                if 'critical' in severity:
-                    assets[asset]['critical'] += 1
-                elif 'high' in severity:
-                    assets[asset]['high'] += 1
-                elif 'medium' in severity:
-                    assets[asset]['medium'] += 1
-                elif 'low' in severity:
-                    assets[asset]['low'] += 1
-                else:
-                    assets[asset]['info'] += 1
-                assets[asset]['total'] += 1
-        
-        return list(assets.values())
-
-
-def parse_excel_for_report(file_path: str, report_type: str = 'type1') -> Dict[str, Any]:
-    """
-    Unified function to parse Excel for any report type.
-    
-    Args:
-        file_path: Path to Excel file
-        report_type: 'type1', 'type2', or 'type3'
-    
-    Returns:
-        Dictionary with parsed data tailored for the report type
-    """
-    parser = StandardExcelParser(file_path)
-    
-    if not parser.load():
-        return {'error': 'Failed to load Excel file'}
-    
-    # Extract all data
-    vulnerabilities = parser.extract_vulnerabilities()
-    employees = parser.extract_employee_data()
-    projects = parser.extract_project_data()
-    assets = parser.extract_asset_summary()
+        vulnerabilities.append(vuln)
     
     return {
-        'vulnerabilities': vulnerabilities,
-        'employees': employees,
-        'projects': projects,
+        'metadata': metadata,
         'assets': assets,
-        'summary': {
-            'total_vulnerabilities': len(vulnerabilities),
-            'total_employees': len(employees),
-            'total_projects': len(projects),
-            'total_assets': len(assets),
-            'critical_count': sum(v['severity'].lower() == 'critical' for v in vulnerabilities),
-            'high_count': sum(v['severity'].lower() == 'high' for v in vulnerabilities),
-            'medium_count': sum(v['severity'].lower() == 'medium' for v in vulnerabilities),
-            'low_count': sum(v['severity'].lower() == 'low' for v in vulnerabilities),
-            'info_count': sum(v['severity'].lower() in ['informational', 'info'] for v in vulnerabilities)
-        }
+        'vulnerabilities': vulnerabilities,
+        'raw_df': df
     }
 
+
+def get_severity_counts(vulnerabilities: List[Dict[str, Any]]) -> Dict[str, int]:
+    """
+    Calculate severity counts from vulnerability list.
+    """
+    counts = {
+        'critical': 0,
+        'high': 0,
+        'medium': 0,
+        'low': 0,
+        'informational': 0,
+        'total': 0
+    }
+    
+    for vuln in vulnerabilities:
+        severity = str(vuln.get('severity', '')).lower()
+        counts['total'] += 1
+        
+        if 'critical' in severity:
+            counts['critical'] += 1
+        elif 'high' in severity:
+            counts['high'] += 1
+        elif 'medium' in severity:
+            counts['medium'] += 1
+        elif 'low' in severity:
+            counts['low'] += 1
+        elif 'info' in severity or 'informational' in severity:
+            counts['informational'] += 1
+    
+    return counts
+
+
+def format_for_template(parsed_data: Dict[str, Any], template_type: str = 'generic') -> Dict[str, Any]:
+    """
+    Format the parsed data for specific template types.
+    
+    Args:
+        parsed_data: Output from parse_excel_data()
+        template_type: One of 'generic', 'certin', 'type2', 'type4'
+    
+    Returns:
+        Dictionary formatted for the specific template
+    """
+    
+    metadata = parsed_data['metadata']
+    assets = parsed_data['assets']
+    vulnerabilities = parsed_data['vulnerabilities']
+    
+    if template_type == 'certin' or template_type == 'type3':
+        # Format for Cert-IN template
+        return {
+            'CLIENT_NAME': metadata['client'],
+            'PROJECT_NAME': metadata['project'],
+            'TESTER_NAME': metadata['tester'],
+            'vulnerabilities': vulnerabilities,
+            'assets': assets,
+            'severity_counts': get_severity_counts(vulnerabilities),
+        }
+    
+    elif template_type == 'type2':
+        # Format for Type2 template
+        return {
+            'client_name': metadata['client'],
+            'project_name': metadata['project'],
+            'tester_name': metadata['tester'],
+            'vulnerabilities': vulnerabilities,
+            'assets': assets,
+            'severity_summary': get_severity_counts(vulnerabilities),
+        }
+    
+    elif template_type == 'type4' or template_type == 'main':
+        # Format for Type4/Main template
+        return {
+            'client_name': metadata['client'],
+            'project_name': metadata['project'],
+            'tester_name': metadata['tester'],
+            'vulnerabilities': vulnerabilities,
+            'assets': assets,
+            'severity_counts': get_severity_counts(vulnerabilities),
+        }
+    
+    else:
+        # Generic format
+        return {
+            'metadata': metadata,
+            'assets': assets,
+            'vulnerabilities': vulnerabilities,
+            'severity_counts': get_severity_counts(vulnerabilities),
+        }

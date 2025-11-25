@@ -21,20 +21,22 @@ def extract_comprehensive_data_from_excel(file_path):
     try:
         import sys
         sys.path.insert(0, os.path.dirname(__file__))
-        from excel_parser import StandardExcelParser
+        from excel_parser import parse_excel_data
         
         # Use the unified parser
-        parser = StandardExcelParser(file_path)
-        if not parser.load():
-            return {'error': 'Failed to load Excel file'}
+        parsed_data = parse_excel_data(file_path)
         
-        vulnerabilities = parser.extract_vulnerabilities()
-        employees = parser.extract_employee_data()
-        projects = parser.extract_project_data()
-        assets = parser.extract_asset_summary()
+        print(f"📊 Dashboard: Parsed Excel data")
+        print(f"   Metadata: {parsed_data['metadata']}")
+        print(f"   Assets: {len(parsed_data['assets'])}")
+        print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])}")
+        
+        vulnerabilities = parsed_data['vulnerabilities']
+        assets = parsed_data['assets']
+        metadata = parsed_data['metadata']
         
         # Build comprehensive data structure
-        df = parser.df
+        df = parsed_data['raw_df']
 
         # Build a normalized column name index for flexible lookups
         def _normalize(name: str) -> str:

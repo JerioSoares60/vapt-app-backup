@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import os
+import sys
 import pandas as pd
 from docxtpl import DocxTemplate
 from docx import Document
@@ -17,6 +18,10 @@ import zipfile
 import io
 from sqlalchemy.orm import Session
 from db import get_db, AuditLog, CertINReport
+
+# Add parent directory to path to import excel_parser
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from excel_parser import parse_excel_data, format_for_template
 
 VERSION = "2.2.0"
 
@@ -47,92 +52,68 @@ def sanitize_filename(filename):
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
     return safe_name
 
-def normalize_column_name(col):
-    """Normalize column names to handle case-insensitive and whitespace variations"""
-    return col.strip().lower().replace(' ', '_').replace('/', '_').replace('.', '')
-
 def read_vulnerability_excel(file_path):
-    """Read vulnerability data from Excel with flexible column matching"""
+    """
+    Read vulnerability data from Excel using standardized parser.
+    Converts the new format to legacy format for compatibility with existing code.
+    """
     try:
-        df = pd.read_excel(file_path)
+        # Use the standardized parser
+        parsed_data = parse_excel_data(file_path)
         
-        # Create a mapping of normalized column names to original names
-        column_mapping = {normalize_column_name(col): col for col in df.columns}
+        print(f"✅ Parsed Excel with standardized parser")
+        print(f"   Metadata: {parsed_data['metadata']}")
+        print(f"   Assets: {len(parsed_data['assets'])} assets")
+        print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])} vulnerabilities")
         
-        print(f"Excel columns found: {list(df.columns)}")
-        print(f"Normalized mapping: {column_mapping}")
-        
+        # Convert to legacy format expected by rest of type3.py code
         vulnerabilities = []
-        for idx, row in df.iterrows():
-            vuln_data = {}
-            
-            # Enhanced column aliases for the standardized Excel format
-            column_aliases = {
-                # Core identification fields
-                'observation_number': ['srno', 'sr_no', 'sno', 'observation_number', 'obs_number', 'observation'],
-                'observation': ['observation', 'obs', 'observation_id', 'vuln_id'],
-                'new_or_repeat': ['neworre', 'new_or_re', 'new_or_repeat_observation', 'new_or_repeat', 'status_type'],
-                
-                # Asset and project info (KEY ADDITIONS)
-                'asset': ['assethostname', 'asset_hostname', 'asset', 'hostname', 'url', 'ip'],
-                'purpose': ['instantpurpose', 'instant_purpose', 'purpose', 'asset_purpose'],
-                'vapt_status': ['vaptstatus', 'vapt_status', 'assessment_status', 'overall_status'],
-                'tester_name': ['testername', 'tester_name', 'reportedby', 'reported_by', 'name', 'analyst'],
-                'project': ['project', 'projectname', 'project_name', 'assessment'],
-                'client': ['clientname', 'client_name', 'client', 'organization'],
-                
-                # Technical details
-                'cve_cwe': ['cvecwe', 'cve_cwe', 'cve', 'cwe'],
-                'cvss': ['cvss', 'cvss_score', 'cvssscore'],
-                'cvss_version': ['cvssversion', 'cvss_version_ref', 'cvss_version', 'cvss_ref'],
-                'cvss_vector': ['cvssvector', 'cvss_vector', 'vector'],
-                'affected_asset': ['affectedassetieipurlapplicationetc', 'affected_asset', 'target_asset', 'asset_ip'],
-                
-                # Vulnerability details
-                'title': ['observationvulnerabilitytitle', 'vulnerability_title', 'title', 'name'],
-                'description': ['detailedobservationvulnerablepoint', 'detailed_observation', 'description', 'details', 'vulnerable_point'],
-                'recommendation': ['vulnerabilityrecommendation', 'recommendation', 'recommendations', 'remediation', 'solution'],
-                'reference': ['reference', 'references', 'ref', 'links'],
-                
-                # Evidence/PoC
-                'evidence': ['evidenceproofofconceptscreenshot', 'evidence', 'proof_of_concept', 'poc', 'screenshot'],
-                
-                # Status fields
-                'severity': ['severity', 'risk', 'criticality', 'priority'],
-                'status': ['status', 'state', 'remediation_status'],
-                
-                # Count fields (for summary rows)
-                'critical': ['critical'],
-                'high': ['high'],
-                'medium': ['medium'],
-                'low': ['low'],
-                'informational': ['informational', 'info'],
-                'total': ['total']
+        for idx, vuln in enumerate(parsed_data['vulnerabilities'], 1):
+            vuln_data = {
+                # Map new format to old format
+                'observation_number': str(vuln.get('sr_no', idx)),
+                'observation': vuln.get('observation', vuln.get('sr_no', idx)),
+                'new_or_repeat': vuln.get('new_or_re', 'New'),
+                'asset': vuln.get('affected_asset', ''),
+                'purpose': '',  # Not directly in vuln, would come from assets
+                'vapt_status': vuln.get('status', 'Open'),
+                'tester_name': vuln.get('tester', parsed_data['metadata']['tester']),
+                'project': vuln.get('project', parsed_data['metadata']['project']),
+                'client': vuln.get('client', parsed_data['metadata']['client']),
+                'cve_cwe': vuln.get('cve_cwe', ''),
+                'cvss': str(vuln.get('cvss', '')),
+                'cvss_version': '',  # Can be extracted from cvss_vector if needed
+                'cvss_vector': vuln.get('cvss_vector', ''),
+                'affected_asset': vuln.get('affected_asset', '') or vuln.get('ip_url_app', ''),
+                'title': vuln.get('observation', ''),
+                'description': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
+                'recommendation': vuln.get('recommendation', ''),
+                'reference': vuln.get('reference', ''),
+                'evidence': vuln.get('evidence', ''),
+                'severity': vuln.get('severity', 'Medium'),
+                'status': vuln.get('status', 'Open'),
+                # Count fields (not used in type3 but kept for compatibility)
+                'critical': '',
+                'high': '',
+                'medium': '',
+                'low': '',
+                'informational': '',
+                'total': ''
             }
             
-            # Try to find each field using aliases
-            for standard_key, aliases in column_aliases.items():
-                value = None
-                for alias in aliases:
-                    norm_alias = normalize_column_name(alias)
-                    if norm_alias in column_mapping:
-                        original_col = column_mapping[norm_alias]
-                        value = row[original_col]
-                        break
-                
-                # Store with standard key
-                vuln_data[standard_key] = str(value).strip() if pd.notna(value) else ""
-            
-            # Add raw row data for debugging
-            for col in df.columns:
-                if col not in vuln_data:
-                    vuln_data[col] = str(row[col]) if pd.notna(row[col]) else ""
+            # If evidence is empty but we have steps, create evidence text from steps
+            if not vuln_data['evidence'] and vuln.get('steps'):
+                evidence_lines = []
+                for step in vuln['steps']:
+                    evidence_lines.append(f"Step {step['number']}: {step['content']}")
+                vuln_data['evidence'] = '\n'.join(evidence_lines)
             
             vulnerabilities.append(vuln_data)
-            print(f"📄 Row {idx + 1}: Tester={vuln_data.get('tester_name','N/A')}, Project={vuln_data.get('project','N/A')}, Client={vuln_data.get('client','N/A')}, Title={vuln_data.get('title','N/A')[:50]}")
+            print(f"📄 Row {idx}: Tester={vuln_data['tester_name']}, Project={vuln_data['project']}, Client={vuln_data['client']}, Title={vuln_data['title'][:50]}")
         
-        print(f"✅ Extracted {len(vulnerabilities)} rows from Excel")
+        print(f"✅ Converted {len(vulnerabilities)} vulnerabilities to legacy format")
         return vulnerabilities
+        
     except Exception as e:
         print(f"Error reading vulnerability Excel: {e}")
         traceback.print_exc()

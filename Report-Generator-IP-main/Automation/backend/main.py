@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+import sys
 import pandas as pd
 from docxtpl import DocxTemplate, InlineImage
 from docx import Document
@@ -35,6 +36,10 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
     print("Warning: PIL/Pillow library not available. Logo resizing will be disabled.")
+
+# Add parent directory to path to import excel_parser
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from excel_parser import parse_excel_data, format_for_template
 
 # Version tracking for code changes
 # Format: MAJOR.MINOR.PATCH
@@ -679,11 +684,64 @@ def normalize_filename(fname):
 # Function to parse the uploaded Excel file for vulnerability data
 def parse_vulnerabilities_excel(file_path):
     """
-    Parse the uploaded Excel file and return a dict of vulnerabilities grouped by IP.
+    Parse the uploaded Excel file using standardized parser and return a dict grouped by IP.
     Each key is an IP, and the value is a list of vulnerability dicts for that IP.
     """
     print(f"Parsing vulnerability data from: {file_path}")
     try:
+        # Try to use standardized parser first
+        try:
+            parsed_data = parse_excel_data(file_path)
+            print(f"✅ Using standardized Excel parser")
+            print(f"   Metadata: {parsed_data['metadata']}")
+            print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])}")
+            
+            vulnerabilities_by_ip = {}
+            for index, vuln in enumerate(parsed_data['vulnerabilities']):
+                # Get IP from affected_asset or ip_url_app
+                ip = vuln.get('affected_asset', '') or vuln.get('ip_url_app', '')
+                if not ip:
+                    print(f"Row {index} missing IP, skipping.")
+                    continue
+                
+                # Convert steps to steps_with_screenshots format
+                steps_with_screenshots = []
+                if vuln.get('steps'):
+                    for step in vuln['steps']:
+                        steps_with_screenshots.append({
+                            'text': step['content'],
+                            'screenshot': ''  # Screenshots handled separately via PoC mapping
+                        })
+                
+                # Convert to main.py format
+                vulnerability = {
+                    'ip': ip,
+                    'name': vuln.get('observation', ''),
+                    'description': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
+                    'impact': '',  # Not in standardized format, will be generated
+                    'severity': vuln.get('severity', 'Medium'),
+                    'cvss': vuln.get('cvss', ''),
+                    'vulnerable_url': vuln.get('ip_url_app', ''),
+                    'vulnerable_parameter': '',  # Not in standardized format
+                    'remediation': vuln.get('recommendation', ''),
+                    'steps_with_screenshots': steps_with_screenshots,
+                    'sr_no': str(vuln.get('sr_no', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
+                    'no_vuln': False
+                }
+                
+                if ip not in vulnerabilities_by_ip:
+                    vulnerabilities_by_ip[ip] = []
+                vulnerabilities_by_ip[ip].append(vulnerability)
+                print(f"Parsed vulnerability Sr No: {vulnerability['sr_no']} for IP: {ip} at index {index}")
+            
+            print(f"Total IPs extracted (standardized parser): {len(vulnerabilities_by_ip)}")
+            return vulnerabilities_by_ip
+            
+        except Exception as std_parse_error:
+            print(f"⚠️  Standardized parser failed, falling back to legacy parser: {std_parse_error}")
+            traceback.print_exc()
+        
+        # Fallback to original parsing logic
         df = pd.read_excel(file_path)
         print(f"Vulnerability Excel file read successfully. Columns: {df.columns.tolist()}")
         df.columns = df.columns.str.strip()

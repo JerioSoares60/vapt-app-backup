@@ -104,7 +104,7 @@ async def block_dangerous_paths(request: Request, call_next):
 @app.get("/report_formats.html", response_class=HTMLResponse)
 async def report_formats():
     with open("Automation/report_formats.html", encoding="utf-8") as f:
-        return f.read()
+        return f.read() 
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
