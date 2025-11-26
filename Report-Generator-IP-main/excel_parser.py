@@ -149,9 +149,14 @@ def safe_get_value(row: pd.Series, col_name: Optional[str], default: Any = '') -
     return value
 
 
-def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
+def parse_excel_data(excel_file_path: str, sheet_name: str = None) -> Dict[str, Any]:
     """
     Parse the standardized Excel format and extract all relevant data.
+    
+    Args:
+        excel_file_path: Path to the Excel file
+        sheet_name: Name of the sheet to read (e.g., 'Web', 'IP', 'Cert-IN'). 
+                    If None, reads the first sheet.
     
     Returns a dictionary containing:
     - metadata: Dict with client, project, tester info
@@ -160,8 +165,13 @@ def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
     - raw_df: The original DataFrame for custom processing
     """
     
-    # Read the Excel file
-    df = pd.read_excel(excel_file_path)
+    # Read the Excel file (specific sheet if provided)
+    if sheet_name:
+        df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
+        print(f"📊 Reading sheet: '{sheet_name}'")
+    else:
+        df = pd.read_excel(excel_file_path)
+        print(f"📊 Reading first sheet")
     
     print(f"📊 Excel file loaded: {len(df)} rows, {len(df.columns)} columns")
     print(f"📋 Available columns: {list(df.columns)}")

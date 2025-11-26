@@ -231,8 +231,9 @@ def parse_vulnerabilities_excel(file_path):
     try:
         # Try to use standardized parser first
         try:
-            parsed_data = parse_excel_data(file_path)
-            print(f"✅ Using standardized Excel parser")
+            # type4 is Web report - read from "Web" sheet
+            parsed_data = parse_excel_data(file_path, sheet_name="Web")
+            print(f"✅ Using standardized Excel parser (Web sheet)")
             print(f"   Metadata: {parsed_data['metadata']}")
             print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])}")
             
