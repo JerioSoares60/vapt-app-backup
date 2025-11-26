@@ -236,310 +236,181 @@ def normalize_filename(fname):
 # Function to parse the uploaded Excel file for vulnerability data
 def parse_vulnerabilities_excel(file_path):
     """
-    Parse the uploaded Excel file using standardized parser and convert to legacy format.
-    This function focuses only on vulnerability details and excludes document control info.
+    Parse the uploaded Excel file for IP-based vulnerability data.
+    Excel format: Header in row 1 with columns like Asset/Hostname, Observation, Severity, etc.
     """
     print(f"Parsing vulnerability data from: {file_path}")
-    try:
-        # Try to use standardized parser first
-        try:
-            parsed_data = parse_excel_data(file_path)
-            print(f"✅ Using standardized Excel parser")
-            print(f"   Metadata: {parsed_data['metadata']}")
-            print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])}")
-            
-            vulnerabilities = []
-            for index, vuln in enumerate(parsed_data['vulnerabilities']):
-                # Convert steps to steps_with_screenshots format
-                steps_with_screenshots = []
-                if vuln.get('steps'):
-                    for step in vuln['steps']:
-                        steps_with_screenshots.append({
-                            'text': step['content'],
-                            'screenshot': ''  # Screenshots handled separately via PoC mapping
-                        })
-                
-                # Extract CVE/CWE list
-                associated_cves = []
-                cve_cwe_str = vuln.get('cve_cwe', '')
-                if cve_cwe_str:
-                    associated_cves = [c.strip() for c in re.split(r'[\n,;]', cve_cwe_str) if c.strip()]
-                
-                # Convert to type2 format
-                vulnerability = {
-                    'name': vuln.get('observation', ''),
-                    'description': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
-                    'impact': '',  # Not in standardized format, will be generated
-                    'severity': vuln.get('severity', 'Medium'),
-                    'cvss': vuln.get('cvss', None),
-                    'ip': vuln.get('affected_asset', '') or vuln.get('ip_url_app', ''),
-                    'vulnerable_parameter': '',  # Not in standardized format
-                    'remediation': vuln.get('recommendation', ''),
-                    'steps_with_screenshots': steps_with_screenshots,
-                    'sr_no': str(vuln.get('sr_no', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
-                    'associated_cves': associated_cves,
-                    'reference_link': vuln.get('reference', ''),
-                    'reported_by': vuln.get('tester', parsed_data['metadata']['tester']),
-                    'project': vuln.get('project', parsed_data['metadata']['project']),
-                    'severity_level': vuln.get('severity', 'Medium'),
-                    'is_no_vuln_box': False,
-                    'row_order': int(index),
-                }
-                
-                vulnerabilities.append(vulnerability)
-                print(f"Parsed vulnerability Sr No: {vulnerability['sr_no']} at index {index}")
-            
-            print(f"Total vulnerabilities extracted (standardized parser): {len(vulnerabilities)}")
-            return vulnerabilities
-            
-        except Exception as std_parse_error:
-            print(f"⚠️  Standardized parser failed, falling back to legacy parser: {std_parse_error}")
-            traceback.print_exc()
-        
-        # Fallback to original parsing logic
-        df = pd.read_excel(file_path)
-        print(f"Vulnerability Excel file read successfully. Columns: {df.columns.tolist()}")
-        print(f"Excel file has {len(df)} rows")
-        
-        # Clean column names by stripping whitespace
-        df.columns = df.columns.str.strip()
-        
-        # Helper function to find column by various names
-        def find_col(names_list):
-            for name in names_list:
-                for col in df.columns:
-                    if col.lower().replace(' ', '').replace('_', '').replace('-', '') == name.lower().replace(' ', '').replace('_', '').replace('-', ''):
-                        return col
+    
+    def find_column_flexible(df, possible_names):
+        """Find column by checking multiple possible names (case-insensitive, partial match)."""
+        df_cols_lower = {col.lower().strip(): col for col in df.columns}
+        for name in possible_names:
+            name_lower = name.lower().strip()
+            # Exact match
+            if name_lower in df_cols_lower:
+                return df_cols_lower[name_lower]
+            # Partial match (column starts with name or vice versa)
+            for col_lower, col_orig in df_cols_lower.items():
+                if col_lower.startswith(name_lower) or name_lower.startswith(col_lower):
+                    if len(name_lower) >= 3 and len(col_lower) >= 3:
+                        return col_orig
+        return None
+    
+    def clean_value(value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return ""
+        return str(value).strip()
+    
+    def extract_cvss_score(value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
             return None
+        try:
+            match = re.search(r"(\d+\.?\d*)", str(value))
+            if match:
+                return float(match.group(1))
+        except:
+            pass
+        return None
+    
+    try:
+        # Read Excel with header in row 1 (index 0)
+        df = pd.read_excel(file_path, header=0)
+        print(f"Excel file read successfully. Columns: {df.columns.tolist()}")
+        print(f"Total rows: {len(df)}")
         
-        # Map new format column names to legacy names
-        col_vuln_name = find_col(['Observation', 'Vulnerability Name', 'Vuln Name', 'Finding', 'Title'])
-        col_sr_no = find_col(['Sr no', 'Sr No', 'Sr.No', 'Sr.No.', 'S.No', 'Serial No', 'VUL ID'])
-        col_hostname = find_col(['Asset/Hostname', 'Asset Hostname', 'Asset', 'Hostname', 'IP', 'Affected Asset'])
-        col_severity = find_col(['Severity', 'Risk', 'Risk Level'])
-        col_cvss = find_col(['CVSS', 'CVSS Score', 'Score'])
-        col_description = find_col(['Detailed Observation/Vulnerability', 'Detailed Observation', 'Description', 'Observation/Vulnerability'])
-        col_recommendation = find_col(['Recommendation', 'Remediation', 'Fix', 'Solution'])
-        col_reference = find_col(['Reference', 'References', 'Links'])
-        col_cve_cwe = find_col(['CVE/CWE', 'CVE CWE', 'CVE', 'CWE', 'Identifier'])
-        col_tester = find_col(['Tester_Name', 'Tester Name', 'Tester', 'ReportedBy', 'Reported By'])
-        col_project = find_col(['Project', 'Project Name', 'Engagement'])
-        col_evidence = find_col(['Evidence / Proof of Concept', 'Evidence', 'Proof of Concept', 'POC'])
-        col_ip_url = find_col(['IP/URL/App', 'IP URL App', 'Target', 'Endpoint', 'Affected A'])
+        # Clean column names
+        df.columns = df.columns.str.strip()
+        df = df.dropna(axis=1, how='all')
         
-        print(f"Column mapping (legacy fallback):")
-        print(f"  Vuln Name: {col_vuln_name}")
-        print(f"  Sr No: {col_sr_no}")
-        print(f"  Hostname/Asset: {col_hostname}")
-        print(f"  Severity: {col_severity}")
-        print(f"  CVSS: {col_cvss}")
-        print(f"  Description: {col_description}")
-        print(f"  Recommendation: {col_recommendation}")
-        print(f"  Reference: {col_reference}")
-        print(f"  CVE/CWE: {col_cve_cwe}")
-        print(f"  Tester: {col_tester}")
-        print(f"  Project: {col_project}")
-        print(f"  Evidence: {col_evidence}")
-        print(f"  IP/URL: {col_ip_url}")
-
-        # Forward-fill identification/summary columns so multiple rows under the
-        # same IP can omit repeated metadata (Hostname, counts etc.)
-        ffill_cols = [
-            'Hostname', 'IP Type', 'VAPT Status', 'Critical', 'High',
-            'Medium', 'Low', 'Informational', 'Total', 'ReportedBy', 'Project', 'Severity'
-        ]
-        for col in ffill_cols:
-            if col in df.columns:
-                df[col] = df[col].ffill()
+        # Map columns flexibly
+        col_map = {
+            'sr_no': find_column_flexible(df, ['Sr no', 'Sr No', 'Sr.No', 'Sr. No.', 'S.No', 'Serial']),
+            'observation': find_column_flexible(df, ['Observation', 'Vulnerability Name', 'Name of Vulnerability', 'Finding', 'Title']),
+            'hostname': find_column_flexible(df, ['Asset/Hostname', 'Asset Hostname', 'Hostname', 'Asset', 'IP Address']),
+            'affected_asset': find_column_flexible(df, ['Affected Asset', 'IP/URL/App', 'IP URL App', 'Target IP', 'IP']),
+            'severity': find_column_flexible(df, ['Severity', 'Risk', 'Risk Level', 'Risk(Severity)']),
+            'cvss': find_column_flexible(df, ['CVSS', 'CVSS Score', 'Score']),
+            'description': find_column_flexible(df, ['Detailed Observation', 'Observation/Vulnerability', 'Detailed O', 'Description', 'Vulnerability Description']),
+            'recommendation': find_column_flexible(df, ['Recommendation', 'Remediation', 'Fix', 'Solution']),
+            'reference': find_column_flexible(df, ['Reference', 'References', 'Reference Link']),
+            'cve_cwe': find_column_flexible(df, ['CVE/CWE', 'CVE CWE', 'CVE', 'CWE']),
+            'tester': find_column_flexible(df, ['Tester_Name', 'Tester Name', 'Tester', 'Reported By']),
+            'project': find_column_flexible(df, ['Project', 'Project Name', 'Engagement']),
+            'evidence': find_column_flexible(df, ['Evidence / Proof of Concept', 'Evidence', 'Proof of Concept', 'POC']),
+            'vapt_status': find_column_flexible(df, ['VAPT Status', 'Status', 'Assessment Status']),
+        }
+        
+        print(f"Column mapping:")
+        for key, val in col_map.items():
+            print(f"  {key}: {val}")
+        
+        # Find screenshot columns dynamically
+        screenshot_cols = sorted([col for col in df.columns if col.lower().startswith('screenshot')], 
+                                  key=lambda x: int(re.search(r'\d+', x).group()) if re.search(r'\d+', x) else 0)
+        print(f"Screenshot columns found: {screenshot_cols}")
         
         vulnerabilities = []
         
         for index, row in df.iterrows():
+            if row.dropna(how='all').empty:
+                continue
+            
             try:
-                # Skip completely blank lines that do not carry a vulnerability entry
-                vn_raw = str(row.get(col_vuln_name, '') if col_vuln_name else row.get('Vulnerability Name', '')).strip()
-                sr_raw = str(row.get(col_sr_no, '') if col_sr_no else row.get('Sr No', '')).strip()
-                if vn_raw == '' and sr_raw == '':
-                    continue
-                # Extract CVSS score and convert to float
-                cvss_score = None
-                if col_cvss and col_cvss in row:
-                    cvss_score = row[col_cvss]
-                elif 'CVSS Score' in row:
-                    cvss_score = row['CVSS Score']
-                elif 'CVSS' in row:  # Also check for 'CVSS' column for backwards compatibility
-                    cvss_score = row['CVSS']
-                
-                # Get Vulnerable URL
-                vulnerable_url = None
-                if 'Vulnerable URL' in row:
-                    vulnerable_url = row['Vulnerable URL']
-                elif 'Vulnerable Parameter' in row:  # Check for 'Vulnerable Parameter' for backwards compatibility
-                    vulnerable_url = row['Vulnerable Parameter']
-                
-                # Get Vulnerable Parameter (specific field)
-                vulnerable_parameter = None
-                if 'Vulnerable Parameter' in row:
-                    parameter_value = row['Vulnerable Parameter']
-                    # Check if it's NaN and handle it
-                    if isinstance(parameter_value, float) and pd.isna(parameter_value):
-                        vulnerable_parameter = None
-                    else:
-                        vulnerable_parameter = str(parameter_value)
-                
-                # Get Steps with screenshots if available
-                steps_with_screenshots = []
-                steps_text = str(row.get('Steps', '')).splitlines()
-                screenshot_cols = [col for col in df.columns if col.strip().lower().startswith('screenshot')]
-                for i, step_text in enumerate(steps_text):
-                    screenshot_filename = ''
-                    if i < len(screenshot_cols):
-                        screenshot_filename = str(row.get(screenshot_cols[i], '')).strip().lower()
-                    steps_with_screenshots.append({
-                        'text': step_text.strip(),
-                        'screenshot': screenshot_filename
-                    })
-                
-                # Determine severity based on CVSS score
-                severity = get_severity_from_cvss(cvss_score)
-
                 # Get vulnerability name
-                vuln_name = row.get(col_vuln_name, '') if col_vuln_name else row.get('Vulnerability Name', '')
-                def clean_str(s):
-                    return str(s).strip().replace('\u200b', '').replace('\xa0', '').replace(' ', '').lower()
-                is_no_vuln_box = clean_str(vuln_name) in ['novulnerabilityfound', 'novulnerability']
+                vuln_name = clean_value(row.get(col_map['observation'], ''))
+                sr_no_raw = clean_value(row.get(col_map['sr_no'], ''))
                 
-                # For 'No Vulnerability' rows, allow missing/empty fields
-                if is_no_vuln_box:
-                    description = row.get(col_description, '') if col_description else (row.get('Description', '') or row.get('Vulnerability Description', '') or '')
-                    ip = row.get(col_hostname, '') if col_hostname else row.get('Hostname', '')
-                    steps_with_screenshots = []
-                    steps_text = str(row.get('Steps', '')).splitlines()
-                    screenshot_cols = [col for col in df.columns if col.strip().lower().startswith('screenshot')]
-                    for i, step_text in enumerate(steps_text):
-                        screenshot_filename = ''
-                        if i < len(screenshot_cols):
-                            screenshot_filename = str(row.get(screenshot_cols[i], '')).strip().lower()
-                        steps_with_screenshots.append({
-                            'text': step_text.strip(),
-                            'screenshot': screenshot_filename
-                        })
-                    vulnerability = {
-                        'name': vuln_name,
-                        'description': description,
-                        'impact': '',
-                        'severity': '',
-                        'cvss': None,
-                        'ip': ip,
-                        'vulnerable_parameter': '',
-                        'remediation': '',
-                        'steps_with_screenshots': steps_with_screenshots,
-                        'sr_no': str(row.get(col_sr_no, f"VUL-{index+1:03d}") if col_sr_no else row.get('Sr No', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
-                        'associated_cves': [],
-                        'is_no_vuln_box': True,
-                    }
-                    vulnerabilities.append(vulnerability)
-                    print(f"Parsed NO VULNERABILITY box Sr No: {vulnerability['sr_no']} at index {index}")
-                    continue  # Skip the rest of the parsing for this row
+                # Skip rows without vulnerability name and sr_no
+                if not vuln_name and not sr_no_raw:
+                    continue
                 
-                # Use custom description or generate one based on vulnerability name
-                description = row.get(col_description, '') if col_description else row.get('Description', '')
-                if not description:
+                # Generate sr_no if missing
+                sr_no_value = sr_no_raw if sr_no_raw else f"VUL-{index+1:03d}"
+                sr_no_value = sr_no_value.replace('VULN-', 'VUL-')
+                
+                # Check for "No Vulnerability Found" entries
+                clean_name = vuln_name.lower().replace(' ', '').replace('\u200b', '').replace('\xa0', '')
+                is_no_vuln_box = clean_name in ['novulnerabilityfound', 'novulnerability', 'novulnfound']
+                
+                # Get IP/hostname - try multiple columns
+                ip_value = clean_value(row.get(col_map['hostname'], ''))
+                if not ip_value:
+                    ip_value = clean_value(row.get(col_map['affected_asset'], ''))
+                
+                # Get severity
+                severity_text = clean_value(row.get(col_map['severity'], ''))
+                cvss_score = extract_cvss_score(row.get(col_map['cvss'], ''))
+                
+                if severity_text:
+                    severity = severity_text.title()
+                elif cvss_score is not None:
+                    severity = get_severity_from_cvss(cvss_score)
+                else:
+                    severity = ""
+                
+                # Get other fields
+                description = clean_value(row.get(col_map['description'], ''))
+                if not description and vuln_name and not is_no_vuln_box:
                     description = get_vulnerability_description(vuln_name)
                 
-                # Use custom remediation or generate one based on vulnerability name
-                remediation = row.get(col_recommendation, '') if col_recommendation else row.get('Remediation', '')
-                if not remediation:
+                remediation = clean_value(row.get(col_map['recommendation'], ''))
+                if not remediation and vuln_name and not is_no_vuln_box:
                     remediation = get_vulnerability_recommendation(vuln_name)
                 
-                # Get impact information (either from Excel or generate)
-                impact = row.get('Impact', '')
-                if not impact:
+                impact = ""
+                if vuln_name and not is_no_vuln_box:
                     impact = get_vulnerability_impact(vuln_name)
                 
-                # Get Associated CVEs (as a list)
+                reference_link = clean_value(row.get(col_map['reference'], ''))
+                if reference_link.lower() in ['nan', 'none', 'null']:
+                    reference_link = ""
+                
+                # Get CVE/CWE
                 associated_cves = []
-                # Use mapped column or find column for Associated CVEs
-                if col_cve_cwe and pd.notna(row.get(col_cve_cwe, None)):
-                    cve_str = str(row.get(col_cve_cwe, ''))
-                    print(f"[DEBUG] Row {index} CVE/CWE raw: {cve_str}")
-                    # Split by comma, semicolon, or newline
-                    associated_cves = [c.strip() for c in re.split(r'[\n,;]', cve_str) if c.strip()]
-                else:
-                    cve_col = None
-                    for col in df.columns:
-                        if col.strip().replace("'", "").replace(' ', '').lower() in [
-                            'associatedcves', 'associatedcve', 'associatedcvees', 'associatedcvees']:
-                            cve_col = col
-                            break
-                    if cve_col and pd.notna(row.get(cve_col, None)):
-                        cve_str = str(row.get(cve_col, ''))
-                        print(f"[DEBUG] Row {index} Associated CVEs raw: {cve_str}")
-                        associated_cves = [c.strip() for c in re.split(r'[\n,;]', cve_str) if c.strip()]
+                cve_cwe_str = clean_value(row.get(col_map['cve_cwe'], ''))
+                if cve_cwe_str and cve_cwe_str.lower() not in ['nan', 'none']:
+                    associated_cves = [c.strip() for c in re.split(r'[\n,;]', cve_cwe_str) if c.strip()]
                 
-                # Get Reference Link
-                reference_link = ""
-                if col_reference and pd.notna(row.get(col_reference, None)):
-                    ref_link_str = str(row.get(col_reference, '')).strip()
-                    if ref_link_str and ref_link_str.lower() not in ['', 'nan', 'none', 'null']:
-                        reference_link = ref_link_str
-                        print(f"[DEBUG] Row {index} Reference Link: {reference_link}")
-                else:
-                    ref_link_col = None
-                    for col in df.columns:
-                        if col.strip().replace("'", "").replace(' ', '').lower() in [
-                            'referencelink', 'referencelinks', 'refrencelink', 'refrencelinks', 'referencelink']:
-                            ref_link_col = col
-                            break
-                    if ref_link_col and pd.notna(row.get(ref_link_col, None)):
-                        ref_link_str = str(row.get(ref_link_col, '')).strip()
-                        if ref_link_str and ref_link_str.lower() not in ['', 'nan', 'none', 'null']:
-                            reference_link = ref_link_str
-                            print(f"[DEBUG] Row {index} Reference Link: {reference_link}")
+                # Get tester and project
+                reported_by = clean_value(row.get(col_map['tester'], ''))
+                project_name = clean_value(row.get(col_map['project'], ''))
                 
-                # Get new dashboard columns
-                reported_by = ''
-                if col_tester and pd.notna(row.get(col_tester, None)):
-                    reported_by = str(row.get(col_tester, '')).strip()
-                elif pd.notna(row.get('ReportedBy', None)):
-                    reported_by = str(row.get('ReportedBy', '')).strip()
-                    
-                project_name = ''
-                if col_project and pd.notna(row.get(col_project, None)):
-                    project_name = str(row.get(col_project, '')).strip()
-                elif pd.notna(row.get('Project', None)):
-                    project_name = str(row.get('Project', '')).strip()
-                    
-                severity_level = ''
-                if col_severity and pd.notna(row.get(col_severity, None)):
-                    severity_level = str(row.get(col_severity, '')).strip()
-                elif pd.notna(row.get('Severity', None)):
-                    severity_level = str(row.get('Severity', '')).strip()
+                # Parse steps from Evidence column
+                steps_with_screenshots = []
+                evidence_text = clean_value(row.get(col_map['evidence'], ''))
                 
-                # Get IP/hostname
-                ip_value = ''
-                if col_hostname and pd.notna(row.get(col_hostname, None)):
-                    ip_value = str(row.get(col_hostname, '')).strip()
-                elif col_ip_url and pd.notna(row.get(col_ip_url, None)):
-                    ip_value = str(row.get(col_ip_url, '')).strip()
-                elif pd.notna(row.get('Hostname', None)):
-                    ip_value = str(row.get('Hostname', '')).strip()
+                # Also get screenshots from Screenshot columns
+                for i, scr_col in enumerate(screenshot_cols):
+                    scr_value = clean_value(row.get(scr_col, ''))
+                    if scr_value:
+                        step_text = f"Step {i+1}"
+                        # Check if evidence has step text
+                        if evidence_text:
+                            step_match = re.search(rf'step\s*{i+1}[:\.\)]\s*([^\n]+)', evidence_text, re.IGNORECASE)
+                            if step_match:
+                                step_text = step_match.group(1).strip()
+                        steps_with_screenshots.append({
+                            'text': step_text,
+                            'screenshot': scr_value
+                        })
                 
-                # Get sr_no
-                sr_no_value = ''
-                if col_sr_no and pd.notna(row.get(col_sr_no, None)):
-                    sr_no_value = str(row.get(col_sr_no, f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip()
-                else:
-                    sr_no_value = str(row.get('Sr No', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip()
+                # If no screenshot columns but evidence has steps, parse them
+                if not steps_with_screenshots and evidence_text:
+                    step_matches = re.findall(r'step\s*(\d+)[:\.\)]\s*([^\n]+)', evidence_text, re.IGNORECASE)
+                    for step_num, step_content in step_matches:
+                        steps_with_screenshots.append({
+                            'text': step_content.strip(),
+                            'screenshot': ''
+                        })
                 
                 vulnerability = {
                     'name': vuln_name,
                     'description': description,
                     'impact': impact,
-                    'severity': severity if severity else severity_level,
+                    'severity': severity,
                     'cvss': cvss_score,
                     'ip': ip_value,
-                    'vulnerable_parameter': vulnerable_parameter,
+                    'vulnerable_parameter': '',
                     'remediation': remediation,
                     'steps_with_screenshots': steps_with_screenshots,
                     'sr_no': sr_no_value,
@@ -547,40 +418,35 @@ def parse_vulnerabilities_excel(file_path):
                     'reference_link': reference_link,
                     'reported_by': reported_by,
                     'project': project_name,
-                    'severity_level': severity_level,
+                    'severity_level': severity,
                     'is_no_vuln_box': is_no_vuln_box,
                     'row_order': int(index),
                 }
                 
                 vulnerabilities.append(vulnerability)
-                
-                print(f"Parsed vulnerability Sr No: {vulnerability['sr_no']} at index {index}") # Debug print
+                print(f"Parsed vulnerability Sr No: {vulnerability['sr_no']}, Name: {vuln_name[:50]}..., IP: {ip_value}")
                 
             except Exception as e:
                 print(f"Error processing row {index}: {e}")
+                traceback.print_exc()
                 continue
         
         print(f"Total vulnerabilities extracted: {len(vulnerabilities)}")
-        print("After parsing:")
-        for i, v in enumerate(vulnerabilities):
-            print(f"  {i+1}. SR: {v['sr_no']}, Name: {v['name']}, is_no_vuln_box: {v['is_no_vuln_box']}, IP: {v['ip']}")
-        # Print all unique IPs parsed
+        
+        # Print summary
         all_ips = set(v['ip'] for v in vulnerabilities if v['ip'])
-        print(f"All unique IPs parsed: {sorted(all_ips)}")
-        
-        # Count by type
+        print(f"Unique IPs found: {sorted(all_ips)}")
         no_vuln_count = sum(1 for v in vulnerabilities if v['is_no_vuln_box'])
-        regular_vuln_count = sum(1 for v in vulnerabilities if not v['is_no_vuln_box'])
-        print(f"Breakdown: {regular_vuln_count} regular vulnerabilities, {no_vuln_count} 'No Vulnerability' entries")
-        
-        # The vulnerabilities list is now in the order they appeared in the Excel file.
-        # No further sorting is needed to maintain the original order.
+        regular_count = len(vulnerabilities) - no_vuln_count
+        print(f"Breakdown: {regular_count} vulnerabilities, {no_vuln_count} 'No Vulnerability' entries")
         
         return vulnerabilities
         
     except Exception as e:
         print(f"Error parsing vulnerability Excel: {e}")
+        traceback.print_exc()
         return []
+
 
 # Function to parse the fixed document control file
 def parse_doc_control_excel(file_path):
