@@ -239,6 +239,14 @@ def parse_evidence_steps(evidence_text):
     
     return steps
 
+def safe_str(val, default=''):
+    """Convert value to string, handling NaN/None/float safely"""
+    if val is None:
+        return default
+    if isinstance(val, float) and pd.isna(val):
+        return default
+    return str(val) if val else default
+
 def generate_vulnerability_sections(vulnerabilities, poc_mapping):
     """Generate vulnerability sections with proper data extraction"""
     vulnerability_sections = []
@@ -247,29 +255,27 @@ def generate_vulnerability_sections(vulnerabilities, poc_mapping):
         print(f"\nProcessing vulnerability {i}:")
         print(f"Available keys: {list(vuln.keys())}")
         
-        # Extract data using standard keys from normalized mapping
-        obs_num = vuln.get('observation_number', str(i))
-        new_or_repeat = vuln.get('new_or_repeat', 'New')
-        cve_cwe = vuln.get('cve_cwe', '')
-        cvss_version = vuln.get('cvss_version', '')
-        affected_asset = vuln.get('affected_asset', '')
-        title = vuln.get('title', '')
-        description = vuln.get('description', '')
-        recommendation = vuln.get('recommendation', '')
-        reference = vuln.get('reference', '')
-        evidence_text = vuln.get('evidence', '')
+        # Extract data using standard keys from normalized mapping - use safe_str to handle NaN
+        obs_num = safe_str(vuln.get('observation_number'), str(i))
+        new_or_repeat = safe_str(vuln.get('new_or_repeat'), 'New')
+        cve_cwe = safe_str(vuln.get('cve_cwe'))
+        cvss_version = safe_str(vuln.get('cvss_version'))
+        affected_asset = safe_str(vuln.get('affected_asset'))
+        title = safe_str(vuln.get('title'))
+        description = safe_str(vuln.get('description'))
+        recommendation = safe_str(vuln.get('recommendation'))
+        reference = safe_str(vuln.get('reference'))
+        evidence_text = safe_str(vuln.get('evidence'))
         
         # Extract severity and other metadata
-        severity = vuln.get('severity', 'Medium')
-        cvss = vuln.get('cvss', '')
-        cvss_vector = vuln.get('cvss_vector', '')
-        status = vuln.get('status', 'Open')
+        severity = safe_str(vuln.get('severity'), 'Medium')
+        cvss = safe_str(vuln.get('cvss'))
+        cvss_vector = safe_str(vuln.get('cvss_vector'))
+        status = safe_str(vuln.get('status'), 'Open')
         
         print(f"Extracted - Title: {title}, CVE: {cve_cwe}, Asset: {affected_asset}")
         
-        # Parse evidence steps from Excel - ensure evidence_text is a string
-        if not isinstance(evidence_text, str):
-            evidence_text = str(evidence_text) if evidence_text and not (isinstance(evidence_text, float) and pd.isna(evidence_text)) else ''
+        # Parse evidence steps from Excel
         evidence_steps = parse_evidence_steps(evidence_text)
         
         # Get PoC images for this observation
