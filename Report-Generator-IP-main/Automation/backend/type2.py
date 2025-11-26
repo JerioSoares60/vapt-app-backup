@@ -918,22 +918,45 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
     run.font.bold = True
     run.font.color.rgb = RGBColor(font_r, font_g, font_b)
     steps = vulnerability.get('steps_with_screenshots', [])
-    if not steps:
+    
+    # Remove duplicate steps based on text content
+    unique_steps = []
+    seen_texts = set()
+    for step in steps:
+        step_text = step.get('text', '').strip()
+        if step_text and step_text not in seen_texts:
+            unique_steps.append(step)
+            seen_texts.add(step_text)
+    
+    if not unique_steps:
         run = paragraph.add_run("No steps provided.")
         run.font.name = 'Altone Trial'
         run.font.size = Pt(11)
     else:
-        for step_idx, step in enumerate(steps):
+        for step_idx, step in enumerate(unique_steps):
             step_para = cell.add_paragraph()
             step_para.paragraph_format.left_indent = Pt(10)
-            step_text = step['text']
-            run = step_para.add_run(f"{step_text}")
+            step_text = step['text'].strip()
+            # Always add step numbering with bold "Step X:" prefix
+            run = step_para.add_run(f"Step {step_idx+1}: ")
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(11)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(font_r, font_g, font_b)
+            # Remove any existing "Step X:" prefix from text to avoid duplication
+            step_text_clean = re.sub(r'^step\s*\d+\s*[:\.\)]\s*', '', step_text, flags=re.IGNORECASE).strip()
+            # Add step content
+            run = step_para.add_run(step_text_clean)
             run.font.name = 'Altone Trial'
             run.font.size = Pt(11)
             run.font.bold = False
+            # Find and insert screenshot
             screenshot_path = None
-            if image_map and step.get('screenshot'):
-                screenshot_path = find_image_for_step(step['screenshot'], image_map, display_sr_no, step_idx+1)
+            if image_map:
+                screenshot_path = find_image_for_step(
+                    step.get('screenshot', ''), image_map, display_sr_no, step_idx+1,
+                    ip=vulnerability.get('ip', ''), severity=vulnerability.get('severity', '')
+                )
             if screenshot_path and os.path.exists(screenshot_path):
                 screenshot_para = cell.add_paragraph()
                 screenshot_para.paragraph_format.left_indent = Pt(20)
@@ -943,11 +966,11 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
                 missing_para = cell.add_paragraph()
                 missing_para.paragraph_format.left_indent = Pt(20)
                 missing_para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = missing_para.add_run(f"[Screenshot missing: {step.get('screenshot')}]")
+                run = missing_para.add_run(f"[Screenshot missing: step{step_idx+1}]")
                 run.font.name = 'Altone Trial'
                 run.font.size = Pt(10)
                 run.font.italic = True
-            if step_idx < len(steps) - 1:
+            if step_idx < len(unique_steps) - 1:
                 spacer = cell.add_paragraph()
                 spacer.paragraph_format.space_after = Pt(6)
     
