@@ -59,7 +59,8 @@ def read_vulnerability_excel(file_path):
     """
     # Try standardized parser first
     try:
-        parsed_data = parse_excel_data(file_path)
+        # type3 is Cert-IN report - read from "Cert-IN" sheet
+        parsed_data = parse_excel_data(file_path, sheet_name="Cert-IN")
         
         # Check if we got valid data
         if parsed_data and parsed_data.get('vulnerabilities'):

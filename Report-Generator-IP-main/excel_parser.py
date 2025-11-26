@@ -167,8 +167,23 @@ def parse_excel_data(excel_file_path: str, sheet_name: str = None) -> Dict[str, 
     
     # Read the Excel file (specific sheet if provided)
     if sheet_name:
-        df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
-        print(f"📊 Reading sheet: '{sheet_name}'")
+        # Get all sheet names from the Excel file
+        xl = pd.ExcelFile(excel_file_path)
+        available_sheets = xl.sheet_names
+        print(f"📊 Available sheets in Excel: {available_sheets}")
+        
+        # Find matching sheet (case-insensitive)
+        target_sheet = None
+        for s in available_sheets:
+            if s.lower() == sheet_name.lower():
+                target_sheet = s
+                break
+        
+        if target_sheet:
+            df = pd.read_excel(excel_file_path, sheet_name=target_sheet)
+            print(f"📊 Reading sheet: '{target_sheet}'")
+        else:
+            raise ValueError(f"Sheet '{sheet_name}' not found. Available sheets: {available_sheets}")
     else:
         df = pd.read_excel(excel_file_path)
         print(f"📊 Reading first sheet")
