@@ -463,6 +463,10 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
         run_label.font.name = 'Altone Trial'
         run_label.font.size = Pt(10)
         run_label.font.bold = True
+        # Ensure text is a string (handle NaN/float values)
+        if text is None or (isinstance(text, float) and pd.isna(text)):
+            text = ''
+        text = str(text)
         run_value = p.add_run(text)
         run_value.font.name = 'Altone Trial'
         run_value.font.size = Pt(10)
