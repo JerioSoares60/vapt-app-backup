@@ -30,42 +30,42 @@ def normalize_column_name(col: str) -> str:
 # Column mapping dictionary - maps various possible column names to standard keys
 COLUMN_MAPPINGS = {
     # Asset Information
-    'asset': ['asset', 'hostname', 'asset hostname', 'asset/hostname', 'host', 'asset  hostname'],
-    'instant_purpose': ['instant purpose', 'purpose', 'asset purpose', 'instant_purpose'],
-    'vapt_status': ['vapt status', 'vapt_status', 'status', 'assessment status'],
+    'asset': ['asset', 'hostname', 'asset hostname', 'asset/hostname', 'asset hos', 'host', 'asset  hostname'],
+    'instant_purpose': ['instant purpose', 'instant pu', 'purpose', 'asset purpose', 'instant_purpose'],
+    'vapt_status': ['vapt status', 'vapt stat', 'vapt_status', 'status', 'assessment status'],
     
     # Severity Counts (for asset-level summary)
     'critical_count': ['critical', 'critical count'],
     'high_count': ['high', 'high count'],
     'medium_count': ['medium', 'medium count'],
     'low_count': ['low', 'low count'],
-    'informational_count': ['informational', 'info', 'informational count'],
+    'informational_count': ['informational', 'informatio', 'info', 'informational count'],
     'total_count': ['total', 'total count', 'total vulnerabilities'],
     
     # Tester and Project Information
-    'tester_name': ['tester name', 'tester', 'tester_name', 'auditor', 'auditor name', 'tested by'],
+    'tester_name': ['tester name', 'tester na', 'tester', 'tester_name', 'auditor', 'auditor name', 'tested by'],
     'project': ['project', 'project name', 'engagement'],
     'client': ['client', 'client name', 'organization'],
     
     # Vulnerability Details
     'sr_no': ['sr no', 'sr no.', 'sr.no', 'sr.no.', 'serial no', 'serial number', 's.no', 's no', 'no', '#', 'vul id'],
-    'observation': ['observation', 'title', 'vulnerability name', 'vuln name', 'finding', 'observation/vulnerability'],
+    'observation': ['observation', 'observati', 'title', 'vulnerability name', 'vuln name', 'finding', 'observation/vulnerability'],
     'severity': ['severity', 'risk', 'risk level'],
     'status': ['status', 'vuln status', 'finding status'],
     'new_or_re': ['new or re', 'new re', 'new_or_re', 'type', 'finding type'],
     'cve_cwe': ['cve cwe', 'cve/cwe', 'cve', 'cwe', 'identifier'],
     'cvss': ['cvss', 'cvss score', 'score'],
-    'cvss_vector': ['cvss vector', 'cvss version', 'cvss string', 'vector'],
+    'cvss_vector': ['cvss vector', 'cvss vers', 'cvss version', 'cvss string', 'vector'],
     'affected_asset': ['affected asset', 'affected a', 'affected system', 'vulnerable asset'],
     'ip_url_app': ['ip url app', 'ip/url/app', 'target', 'endpoint', 'url', 'ip'],
-    'observation_vuln': ['observation vulnerability', 'observation/vulnerability', 'observation vuln', 'description', 'summary'],
-    'detailed_observation': ['detailed observation vulnerability', 'detailed observation', 'detailed observation vuln', 'detailed description', 'details'],
-    'recommendation': ['recommendation', 'remediation', 'fix', 'solution', 'mitigation'],
+    'observation_vuln': ['observation vulnerability', 'observation/vulnerability', 'observati', 'observation vuln', 'description', 'summary'],
+    'detailed_observation': ['detailed observation vulnerability', 'detailed observation', 'detailed o', 'detailed observation vuln', 'detailed description', 'details'],
+    'recommendation': ['recommendation', 'recomme', 'remediation', 'fix', 'solution', 'mitigation'],
     'reference': ['reference', 'references', 'links', 'external references'],
-    'evidence': ['evidence proof of concept', 'evidence', 'proof of concept', 'poc', 'evidence / proof of concept'],
+    'evidence': ['evidence proof of concept', 'evidence / proof of concept', 'evidence', 'proof of concept', 'poc'],
     
     # Screenshot columns (dynamic - can be multiple)
-    'screenshot': ['screenshot', 'screen shot', 'image', 'poc image'],
+    'screenshot': ['screenshot', 'screensh', 'screen shot', 'image', 'poc image'],
     
     # Steps columns (for detailed reproduction steps)
     'step_1': ['step 1', 'step1', 'steps 1'],
@@ -84,6 +84,7 @@ def find_column(df: pd.DataFrame, standard_key: str) -> Optional[str]:
     """
     Find the actual column name in the DataFrame that matches the standard key.
     Returns the actual column name from the DataFrame, or None if not found.
+    Uses both exact and partial matching for flexibility.
     """
     if standard_key not in COLUMN_MAPPINGS:
         return None
@@ -91,10 +92,20 @@ def find_column(df: pd.DataFrame, standard_key: str) -> Optional[str]:
     possible_names = COLUMN_MAPPINGS[standard_key]
     df_columns_normalized = {normalize_column_name(col): col for col in df.columns}
     
+    # First try exact match
     for possible_name in possible_names:
         normalized_possible = normalize_column_name(possible_name)
         if normalized_possible in df_columns_normalized:
             return df_columns_normalized[normalized_possible]
+    
+    # Then try partial match (column starts with possible name or vice versa)
+    for possible_name in possible_names:
+        normalized_possible = normalize_column_name(possible_name)
+        for df_col_normalized, df_col_original in df_columns_normalized.items():
+            # Check if either starts with the other (handles truncated column names)
+            if df_col_normalized.startswith(normalized_possible) or normalized_possible.startswith(df_col_normalized):
+                if len(normalized_possible) >= 3 and len(df_col_normalized) >= 3:  # Avoid too short matches
+                    return df_col_original
     
     return None
 
@@ -268,7 +279,7 @@ def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
         if not obs_title or obs_title == '':
             continue
         
-        # Extract steps
+        # Extract steps from dedicated step columns first
         steps = []
         for step_num in sorted(step_cols.keys()):
             step_content = safe_get_value(row, step_cols[step_num])
@@ -277,6 +288,21 @@ def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
                     'number': step_num,
                     'content': step_content
                 })
+        
+        # If no step columns found, try to parse from Evidence/PoC column
+        evidence_text = safe_get_value(row, col_evidence)
+        if not steps and evidence_text:
+            # Parse "Step 1: ...", "Step 2: ..." from evidence text
+            step_pattern = re.compile(r'Step\s*(\d+)\s*[:\-\.]?\s*(.*?)(?=Step\s*\d+|$)', re.IGNORECASE | re.DOTALL)
+            step_matches = step_pattern.findall(str(evidence_text))
+            for step_num_str, step_content in step_matches:
+                step_num = int(step_num_str)
+                content = step_content.strip()
+                if content:
+                    steps.append({
+                        'number': step_num,
+                        'content': content
+                    })
         
         # Extract screenshots
         screenshots = []
@@ -300,7 +326,7 @@ def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
             'detailed_observation': safe_get_value(row, col_detailed_obs),
             'recommendation': safe_get_value(row, col_recommendation),
             'reference': safe_get_value(row, col_reference),
-            'evidence': safe_get_value(row, col_evidence),
+            'evidence': evidence_text,
             'steps': steps,
             'screenshots': screenshots,
             'tester': safe_get_value(row, col_tester, metadata['tester']),
@@ -308,6 +334,7 @@ def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
             'client': safe_get_value(row, col_client, metadata['client']),
         }
         
+        print(f"   Parsed vuln #{idx}: {obs_title[:40]}... (severity: {vuln['severity']}, steps: {len(steps)})")
         vulnerabilities.append(vuln)
     
     return {
