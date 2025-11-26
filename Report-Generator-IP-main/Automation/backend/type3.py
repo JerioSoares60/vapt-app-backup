@@ -577,6 +577,190 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     return table
 
 
+def create_asset_findings_table(doc, vulnerability_data):
+    """Create the Asset/Hostname findings table with vulnerability counts"""
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+    
+    if not vulnerability_data:
+        return
+    
+    # Aggregate data by asset
+    asset_data = {}
+    for vuln in vulnerability_data:
+        asset = safe_str(vuln.get('asset', '')) or safe_str(vuln.get('affected_asset', '')) or 'Unknown'
+        purpose = safe_str(vuln.get('purpose', '')) or safe_str(vuln.get('vapt_status', ''))
+        status = safe_str(vuln.get('vapt_status', '')) or safe_str(vuln.get('status', 'Open'))
+        severity = safe_str(vuln.get('severity', 'Medium')).lower()
+        
+        if asset not in asset_data:
+            asset_data[asset] = {
+                'purpose': purpose,
+                'status': status,
+                'critical': 0,
+                'high': 0,
+                'medium': 0,
+                'low': 0,
+                'informational': 0
+            }
+        
+        # Count by severity
+        if severity in ['critical']:
+            asset_data[asset]['critical'] += 1
+        elif severity in ['high']:
+            asset_data[asset]['high'] += 1
+        elif severity in ['medium']:
+            asset_data[asset]['medium'] += 1
+        elif severity in ['low']:
+            asset_data[asset]['low'] += 1
+        elif severity in ['informational', 'info']:
+            asset_data[asset]['informational'] += 1
+    
+    # Calculate totals
+    overall = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'informational': 0}
+    for asset, counts in asset_data.items():
+        counts['total'] = counts['critical'] + counts['high'] + counts['medium'] + counts['low'] + counts['informational']
+        overall['critical'] += counts['critical']
+        overall['high'] += counts['high']
+        overall['medium'] += counts['medium']
+        overall['low'] += counts['low']
+        overall['informational'] += counts['informational']
+    overall['total'] = overall['critical'] + overall['high'] + overall['medium'] + overall['low'] + overall['informational']
+    
+    # Add page break and heading
+    doc.add_page_break()
+    
+    # Create table with header row + data rows + overall row
+    num_rows = 1 + len(asset_data) + 1  # header + assets + overall
+    table = doc.add_table(rows=num_rows, cols=9)
+    table.style = 'Table Grid'
+    
+    # Column headers
+    headers = ['Sr.\nNo.', 'Asset/Hostname', 'Instant\npurpose', 'VAPT\nStatus', 'Critical', 'High', 'Medium', 'Low', 'Informational', 'Total']
+    
+    # Actually we need 10 columns
+    # Recreate table with correct columns
+    for row in table.rows:
+        for cell in row.cells:
+            pass
+    
+    # Remove old table and create new one
+    table._element.getparent().remove(table._element)
+    table = doc.add_table(rows=num_rows, cols=10)
+    table.style = 'Table Grid'
+    
+    # Header row styling
+    header_row = table.rows[0]
+    headers = ['Sr.\nNo.', 'Asset/Hostname', 'Instant\npurpose', 'VAPT\nStatus', 'Critical', 'High', 'Medium', 'Low', 'Informational', 'Total']
+    
+    severity_colors = {
+        4: 'FF0000',  # Critical - Red
+        5: 'FF6600',  # High - Orange
+        6: 'FFCC00',  # Medium - Yellow
+        7: '00CC00',  # Low - Green
+        8: '3399FF',  # Informational - Blue
+        9: '6923D0'   # Total - Purple
+    }
+    
+    for idx, header_text in enumerate(headers):
+        cell = header_row.cells[idx]
+        cell.text = ''
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(header_text)
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(9)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(255, 255, 255)
+        
+        # Purple header background
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="6923D0"/>')
+        cell._element.get_or_add_tcPr().append(shading)
+    
+    # Data rows
+    row_idx = 1
+    for sr_no, (asset, counts) in enumerate(asset_data.items(), 1):
+        row = table.rows[row_idx]
+        
+        # Sr. No.
+        row.cells[0].text = str(sr_no) + '.'
+        row.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Asset/Hostname
+        row.cells[1].text = asset
+        
+        # Instant purpose
+        row.cells[2].text = counts['purpose']
+        row.cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # VAPT Status
+        row.cells[3].text = counts['status']
+        row.cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Severity counts with colored backgrounds
+        severity_vals = [
+            (4, counts['critical'], 'FF0000'),
+            (5, counts['high'], 'FF6600'),
+            (6, counts['medium'], 'FFCC00'),
+            (7, counts['low'], '00CC00'),
+            (8, counts['informational'], '3399FF'),
+            (9, counts['total'], '6923D0')
+        ]
+        
+        for col_idx, val, color in severity_vals:
+            cell = row.cells[col_idx]
+            cell.text = str(val)
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in cell.paragraphs[0].runs:
+                run.font.bold = True
+                run.font.color.rgb = RGBColor(255, 255, 255)
+            shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
+            cell._element.get_or_add_tcPr().append(shading)
+        
+        row_idx += 1
+    
+    # Overall Findings row
+    overall_row = table.rows[row_idx]
+    
+    # Merge first 4 cells for "Overall Findings"
+    overall_row.cells[0].merge(overall_row.cells[3])
+    overall_row.cells[0].text = 'Overall Findings'
+    overall_row.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in overall_row.cells[0].paragraphs[0].runs:
+        run.font.bold = True
+    
+    # Overall severity counts
+    overall_vals = [
+        (4, overall['critical'], 'FF0000'),
+        (5, overall['high'], 'FF6600'),
+        (6, overall['medium'], 'FFCC00'),
+        (7, overall['low'], '00CC00'),
+        (8, overall['informational'], '3399FF'),
+        (9, overall['total'], '6923D0')
+    ]
+    
+    for col_idx, val, color in overall_vals:
+        cell = overall_row.cells[col_idx]
+        cell.text = str(val)
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in cell.paragraphs[0].runs:
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 255, 255)
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
+        cell._element.get_or_add_tcPr().append(shading)
+    
+    # Apply font styling to all cells
+    for row in table.rows:
+        for cell in row.cells:
+            for para in cell.paragraphs:
+                for run in para.runs:
+                    run.font.name = 'Altone Trial'
+                    if run.font.size is None:
+                        run.font.size = Pt(10)
+    
+    return table
+
+
 def generate_certin_report_from_form(data, template_path, output_path, vulnerability_data=None, poc_mapping=None):
     """Generate Cert-IN report from form data and template"""
     try:
@@ -643,6 +827,9 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         doc = Document(tmp_path)
         
         if vulnerability_sections:
+            # Add Asset Findings Table before Detailed Observations
+            create_asset_findings_table(doc, vulnerability_data)
+            
             doc.add_page_break()
             
             vuln_heading = doc.add_paragraph()
