@@ -336,243 +336,243 @@ def generate_vulnerability_sections(vulnerabilities, poc_mapping):
 def create_landscape_vulnerability_box(doc, vulnerability_section):
     """Create properly formatted vulnerability box matching expected layout"""
     import os
-    from docx.shared import Inches, Pt, RGBColor
+    from docx.shared import Inches, Pt, RGBColor, Twips
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import parse_xml
     from docx.oxml.ns import nsdecls
 
-    # helper to set explicit cell width so Word respects it
-    def set_cell_width(cell, width_inches):
-        tc = cell._tc
-        tcPr = tc.get_or_add_tcPr()
-        # width in twentieths of a point (dxa) is what Word expects - but python-docx uses w:w with type="dxa"
-        tcPr.append(parse_xml(f'<w:tcW {nsdecls("w")} w:w="{int(width_inches * 914400/914400*1440)}" w:type="dxa"/>'))
-
-    # compact paragraph formatting helper
-    def make_para(cell, align=WD_ALIGN_PARAGRAPH.LEFT):
-        p = cell.paragraphs[0]
-        p.alignment = align
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after = Pt(0)
-        p.paragraph_format.line_spacing = 1
-        p.text = ""  # clear any runs
-        return p
-
-    # Create table with 2 header rows initially
-    table = doc.add_table(rows=2, cols=3)
-    table.style = 'Table Grid'
-    # Try to prevent Word from auto-fitting
-    try:
-        table.autofit = False
-    except Exception:
-        pass
-
-    # Determine page usable width so we can size columns reasonably
-    section = doc.sections[-1]
-    page_usable_width = section.page_width - section.left_margin - section.right_margin
-
-    # choose column widths (as Inches) that add up to page width (approx)
-    # You can tweak these to match your template (example: 3.2 / 1.4 / 1.4)
-    col_widths_in = [Inches(3.2), Inches(1.9), Inches(1.9)]
-
-    # set each column width on both column object and each cell
-    for col_idx, w in enumerate(col_widths_in):
-        try:
-            table.columns[col_idx].width = w
-        except Exception:
-            # some python-docx versions don't allow setting columns; fall back to per-cell width
-            pass
-        for row in table.rows:
-            set_cell_width(row.cells[col_idx], w.inches if hasattr(w, 'inches') else float(w))
-
-    # ---------- Header row 1: Observation | Severity | Status ----------
-    # Observation cell
-    cell_obs = table.rows[0].cells[0]
-    p_obs = make_para(cell_obs, WD_ALIGN_PARAGRAPH.LEFT)
-    r_obs = p_obs.add_run(f"Observation: #{vulnerability_section.get('observation_number','1')}")
-    r_obs.font.name = 'Altone Trial'
-    r_obs.font.size = Pt(11)
-    r_obs.font.bold = True
-
-    # Severity cell with colored background
-    severity = vulnerability_section.get('severity', 'Medium').strip()
+    # Get severity colors
+    severity = safe_str(vulnerability_section.get('severity', 'Medium')).strip()
     severity_colors = {
         'Critical': {'bg': '990000', 'text': 'FFFFFF'},
-        'High': {'bg': 'FF0000', 'text': 'FFFFFF'},
+        'High': {'bg': 'FF6600', 'text': 'FFFFFF'},
         'Medium': {'bg': 'FFCC00', 'text': '000000'},
-        'Low': {'bg': '009933', 'text': 'FFFFFF'},
-        'Informational': {'bg': '3399CC', 'text': 'FFFFFF'}
+        'Low': {'bg': '00CC00', 'text': 'FFFFFF'},
+        'Informational': {'bg': '3399FF', 'text': 'FFFFFF'}
     }
     colors = severity_colors.get(severity, severity_colors['Medium'])
 
-    cell_sev = table.rows[0].cells[1]
-    p_sev = make_para(cell_sev, WD_ALIGN_PARAGRAPH.CENTER)
-    r_sev = p_sev.add_run(f"Severity: {severity}")
-    r_sev.font.name = 'Altone Trial'
-    r_sev.font.size = Pt(11)
-    r_sev.font.bold = True
-    # set text color
-    if colors['text'] == 'FFFFFF':
-        r_sev.font.color.rgb = RGBColor(255, 255, 255)
-    else:
-        r_sev.font.color.rgb = RGBColor(0, 0, 0)
-    # shading (w:fill expects hex without #)
+    # Create main table - Row 1: Obs | Severity | Status, Row 2: New/Repeat | CVE/CWE
+    table = doc.add_table(rows=2, cols=3)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    
+    # Set light gray border color for the table
+    tbl = table._tbl
+    tblPr = tbl.tblPr if tbl.tblPr is not None else parse_xml(f'<w:tblPr {nsdecls("w")}/>')
+    tblBorders = parse_xml(
+        f'<w:tblBorders {nsdecls("w")}>'
+        '<w:top w:val="single" w:sz="4" w:color="CCCCCC"/>'
+        '<w:left w:val="single" w:sz="4" w:color="CCCCCC"/>'
+        '<w:bottom w:val="single" w:sz="4" w:color="CCCCCC"/>'
+        '<w:right w:val="single" w:sz="4" w:color="CCCCCC"/>'
+        '<w:insideH w:val="single" w:sz="4" w:color="CCCCCC"/>'
+        '<w:insideV w:val="single" w:sz="4" w:color="CCCCCC"/>'
+        '</w:tblBorders>'
+    )
+    tblPr.append(tblBorders)
+
+    # ---------- Row 1: Observation | Severity | Status ----------
+    row1 = table.rows[0]
+    
+    # Observation cell
+    cell_obs = row1.cells[0]
+    cell_obs.text = ''
+    p = cell_obs.paragraphs[0]
+    run = p.add_run(f"Observation: #{vulnerability_section.get('observation_number', '1')}")
+    run.font.name = 'Altone Trial'
+    run.font.size = Pt(11)
+    run.font.bold = True
+
+    # Severity cell with colored background
+    cell_sev = row1.cells[1]
+    cell_sev.text = ''
+    p = cell_sev.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"Severity: {severity}")
+    run.font.name = 'Altone Trial'
+    run.font.size = Pt(11)
+    run.font.bold = True
+    run.font.color.rgb = RGBColor(255, 255, 255) if colors['text'] == 'FFFFFF' else RGBColor(0, 0, 0)
     cell_sev._element.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{colors["bg"]}"/>'))
 
-    # Status cell (yellow)
-    cell_status = table.rows[0].cells[2]
-    p_stat = make_para(cell_status, WD_ALIGN_PARAGRAPH.CENTER)
-    status_text = vulnerability_section.get('status', 'Open')
-    r_stat = p_stat.add_run(f"Status: {status_text}")
-    r_stat.font.name = 'Altone Trial'
-    r_stat.font.size = Pt(11)
-    r_stat.font.bold = True
+    # Status cell (yellow/orange)
+    cell_status = row1.cells[2]
+    cell_status.text = ''
+    p = cell_status.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"Status: {safe_str(vulnerability_section.get('status', 'Open'))}")
+    run.font.name = 'Altone Trial'
+    run.font.size = Pt(11)
+    run.font.bold = True
     cell_status._element.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="FFD966"/>'))
 
-    # ---------- Row 2: New/Repeat & CVSS (merge across 3 cols) ----------
-    cvss_cell = table.rows[1].cells[0]
-    cvss_cell.merge(table.rows[1].cells[1])
-    cvss_cell.merge(table.rows[1].cells[2])
-    cvss_para = make_para(cvss_cell, WD_ALIGN_PARAGRAPH.LEFT)
+    # ---------- Row 2: New/Repeat | CVE/CWE (2 columns) ----------
+    row2 = table.rows[1]
+    
+    # New or Repeat Observation cell
+    cell_nor = row2.cells[0]
+    cell_nor.text = ''
+    p = cell_nor.paragraphs[0]
+    run = p.add_run("New or Repeat Observation: ")
+    run.font.name = 'Altone Trial'
+    run.font.size = Pt(10)
+    run.font.bold = True
+    run = p.add_run(safe_str(vulnerability_section.get('new_or_repeat', 'New')))
+    run.font.name = 'Altone Trial'
+    run.font.size = Pt(10)
 
-    # New or Repeat
-    new_or_repeat = vulnerability_section.get('new_or_repeat', 'New')
-    nor_run = cvss_para.add_run(f"New or Repeat Observation: {new_or_repeat}")
-    nor_run.font.name = 'Altone Trial'
-    nor_run.font.size = Pt(10)
-    nor_run.font.bold = True
-    cvss_para.add_run("    ")
+    # CVE/CWE cell (merge cells 1 and 2)
+    cell_cve = row2.cells[1]
+    cell_cve.merge(row2.cells[2])
+    cell_cve.text = ''
+    p = cell_cve.paragraphs[0]
+    run = p.add_run("CVE/CWE: ")
+    run.font.name = 'Altone Trial'
+    run.font.size = Pt(10)
+    run.font.bold = True
+    run = p.add_run(safe_str(vulnerability_section.get('cve_cwe', '')))
+    run.font.name = 'Altone Trial'
+    run.font.size = Pt(10)
 
-    # CVSS
-    if vulnerability_section.get('cvss'):
-        cvss_run = cvss_para.add_run(f"CVSS: {vulnerability_section['cvss']}")
-        cvss_run.font.name = 'Altone Trial'
-        cvss_run.font.size = Pt(10)
-        cvss_run.font.bold = True
-
-    # ---------- Content row (merged across 3 cols) ----------
-    content_row = table.add_row()
-    # merge all three cells in content_row so we get one wide cell
-    content_cell = content_row.cells[0]
-    content_cell.merge(content_row.cells[1])
-    content_cell.merge(content_row.cells[2])
-    # clear paragraphs in content_cell
-    for p in content_cell.paragraphs:
-        p.text = ""
-
-    def add_bold_label_paragraph(parent_cell, label, text, is_url=False, underline=False):
-        p = parent_cell.add_paragraph()
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after = Pt(0)
-        p.paragraph_format.line_spacing = 1
-        run_label = p.add_run(label)
-        run_label.font.name = 'Altone Trial'
-        run_label.font.size = Pt(10)
-        run_label.font.bold = True
-        # Ensure text is a string (handle NaN/float values)
-        if text is None or (isinstance(text, float) and pd.isna(text)):
-            text = ''
-        text = str(text)
-        run_value = p.add_run(text)
-        run_value.font.name = 'Altone Trial'
-        run_value.font.size = Pt(10)
-        if is_url:
-            run_value.font.color.rgb = RGBColor(0, 0, 255)
-            run_value.font.underline = True
-        if underline:
-            run_value.font.underline = True
-        return p
-
-    # CVSS Version Ref
-    if vulnerability_section.get('cvss_version'):
-        add_bold_label_paragraph(content_cell, "CVSS Version Ref: ", vulnerability_section['cvss_version'])
-
-    # CVE/CWE
-    if vulnerability_section.get('cve_cwe'):
-        add_bold_label_paragraph(content_cell, "CVE/CWE: ", vulnerability_section['cve_cwe'])
-
-    # CVSS Vector
-    if vulnerability_section.get('cvss_vector'):
-        add_bold_label_paragraph(content_cell, "CVSS Vector: ", vulnerability_section['cvss_vector'])
-
-    # Affected Asset
-    if vulnerability_section.get('affected_asset'):
-        add_bold_label_paragraph(content_cell, "Affected Asset i.e. IP/URL/Application etc.: ", vulnerability_section['affected_asset'], is_url=True)
-
-    # Vulnerability Title
-    if vulnerability_section.get('title'):
-        add_bold_label_paragraph(content_cell, "Observation/ Vulnerability Title: ", vulnerability_section['title'])
-
-    # Detailed Observation
-    if vulnerability_section.get('description'):
-        add_bold_label_paragraph(content_cell, "Detailed Observation/ Vulnerable Point: ", vulnerability_section['description'])
-
-    # Recommendations
-    if vulnerability_section.get('recommendations'):
-        p = content_cell.add_paragraph()
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after = Pt(0)
-        run = p.add_run("Recommendation:\n")
+    # ---------- Content rows (each as separate row for proper layout) ----------
+    
+    def add_content_row(label, value, is_url=False):
+        """Add a single-cell merged row with label: value"""
+        if not value:
+            return
+        row = table.add_row()
+        cell = row.cells[0]
+        cell.merge(row.cells[1])
+        cell.merge(row.cells[2])
+        cell.text = ''
+        p = cell.paragraphs[0]
+        p.paragraph_format.space_before = Pt(3)
+        p.paragraph_format.space_after = Pt(3)
+        
+        run = p.add_run(label)
         run.font.name = 'Altone Trial'
         run.font.size = Pt(10)
         run.font.bold = True
-        for i, rec in enumerate(vulnerability_section['recommendations'], 1):
-            rp = content_cell.add_paragraph(f"{i}. {rec}")
-            rp.paragraph_format.space_before = Pt(0)
-            rp.paragraph_format.space_after = Pt(0)
-            rr = rp.runs[0]
-            rr.font.name = 'Altone Trial'
-            rr.font.size = Pt(10)
+        
+        run = p.add_run(safe_str(value))
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(10)
+        if is_url:
+            run.font.color.rgb = RGBColor(0, 0, 255)
+            run.font.underline = True
 
-    # Reference
-    if vulnerability_section.get('reference'):
-        add_bold_label_paragraph(content_cell, "Reference:\n", vulnerability_section['reference'], is_url=True)
+    # CVSS row
+    add_content_row("CVSS: ", vulnerability_section.get('cvss'))
+    
+    # CVSS Version Ref row
+    add_content_row("CVSS Version Ref: ", vulnerability_section.get('cvss_vector'))
 
-    # Evidence/Proof of Concept images
-    if vulnerability_section.get('has_poc') and vulnerability_section.get('poc_images'):
-        poc_label = content_cell.add_paragraph()
-        poc_label.paragraph_format.space_before = Pt(0)
-        poc_label.paragraph_format.space_after = Pt(0)
-        pl = poc_label.add_run("Evidence / Proof of Concept:\n")
-        pl.font.name = 'Altone Trial'
-        pl.font.size = Pt(10)
-        pl.font.bold = True
+    # Affected Asset row
+    add_content_row("Affected Asset i.e. IP/URL/Application etc.: ", 
+                    vulnerability_section.get('affected_asset'), is_url=True)
 
-        # compute max image width based on page usable width minus a small margin
-        max_img_width = page_usable_width - Inches(0.4)
-        # convert to Inches for add_picture (python-docx uses Inches)
-        try:
-            max_img_width_in = Inches(max_img_width.inches)
-        except Exception:
-            # fallback if page_usable_width is already an Inches-like object
-            max_img_width_in = Inches(5)
+    # Observation/Vulnerability Title row
+    add_content_row("Observation/ Vulnerability Title: ", vulnerability_section.get('title'))
 
-        for poc_img in vulnerability_section['poc_images']:
-            step_para = content_cell.add_paragraph()
-            step_para.paragraph_format.space_before = Pt(0)
-            step_para.paragraph_format.space_after = Pt(0)
-            step_text = f"Step {poc_img.get('step_number','')}: "
+    # Detailed Observation row
+    add_content_row("Detailed Observation/ Vulnerable Point: ", vulnerability_section.get('description'))
+
+    # Recommendation row
+    recommendations = vulnerability_section.get('recommendations', [])
+    if recommendations:
+        row = table.add_row()
+        cell = row.cells[0]
+        cell.merge(row.cells[1])
+        cell.merge(row.cells[2])
+        cell.text = ''
+        p = cell.paragraphs[0]
+        p.paragraph_format.space_before = Pt(3)
+        p.paragraph_format.space_after = Pt(3)
+        
+        run = p.add_run("Recommendation:")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(10)
+        run.font.bold = True
+        
+        for i, rec in enumerate(recommendations, 1):
+            rec_p = cell.add_paragraph()
+            rec_p.paragraph_format.space_before = Pt(0)
+            rec_p.paragraph_format.space_after = Pt(0)
+            run = rec_p.add_run(f"{i}. {safe_str(rec)}")
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(10)
+
+    # Reference row
+    reference = vulnerability_section.get('reference')
+    if reference:
+        row = table.add_row()
+        cell = row.cells[0]
+        cell.merge(row.cells[1])
+        cell.merge(row.cells[2])
+        cell.text = ''
+        p = cell.paragraphs[0]
+        p.paragraph_format.space_before = Pt(3)
+        p.paragraph_format.space_after = Pt(3)
+        
+        run = p.add_run("Reference:")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(10)
+        run.font.bold = True
+        
+        ref_p = cell.add_paragraph()
+        run = ref_p.add_run(safe_str(reference))
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(10)
+        run.font.color.rgb = RGBColor(0, 0, 255)
+        run.font.underline = True
+
+    # Evidence/Proof of Concept row
+    poc_images = vulnerability_section.get('poc_images', [])
+    if poc_images:
+        row = table.add_row()
+        cell = row.cells[0]
+        cell.merge(row.cells[1])
+        cell.merge(row.cells[2])
+        cell.text = ''
+        p = cell.paragraphs[0]
+        p.paragraph_format.space_before = Pt(3)
+        p.paragraph_format.space_after = Pt(3)
+        
+        run = p.add_run("Evidence / Proof of Concept:")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(10)
+        run.font.bold = True
+
+        for poc_img in poc_images:
+            # Step description
+            step_p = cell.add_paragraph()
+            step_p.paragraph_format.space_before = Pt(6)
+            step_p.paragraph_format.space_after = Pt(3)
+            
+            step_text = f"Step {poc_img.get('step_number', '')}: "
             if poc_img.get('description'):
-                step_text += poc_img['description']
-            step_run = step_para.add_run(step_text)
-            step_run.font.name = 'Altone Trial'
-            step_run.font.size = Pt(10)
-            step_run.font.bold = True
+                step_text += safe_str(poc_img['description'])
+            
+            run = step_p.add_run(step_text)
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(10)
+            run.font.bold = True
 
             # Add the image if present
             img_path = poc_img.get('path') or poc_img.get('filename')
             if img_path and os.path.exists(img_path):
-                img_para = content_cell.add_paragraph()
-                img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                img_run = img_para.add_run()
+                img_p = cell.add_paragraph()
+                img_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                img_run = img_p.add_run()
                 try:
-                    img_run.add_picture(img_path, width=max_img_width_in)
+                    img_run.add_picture(img_path, width=Inches(5))
                 except Exception as e:
-                    err_p = content_cell.add_paragraph(f"[Image error: {os.path.basename(img_path)}: {e}]")
-                    err_p.runs[0].italic = True
+                    err_p = cell.add_paragraph(f"[Image error: {os.path.basename(img_path)}: {e}]")
+                    err_p.runs[0].font.italic = True
             else:
-                missing_p = content_cell.add_paragraph(f"[Image missing: {poc_img.get('filename', 'unknown')}]")
-                missing_p.runs[0].italic = True
+                missing_p = cell.add_paragraph(f"[Image missing: {poc_img.get('filename', 'unknown')}]")
+                missing_p.runs[0].font.italic = True
 
     return table
 
