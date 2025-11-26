@@ -820,11 +820,11 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
                     run.font.name = 'Altone Trial'
                     run.font.size = Pt(11)
                     run.font.bold = False
-                    # Find and insert screenshot
+                    # Find and insert screenshot - always try to find by SR and step number
                     screenshot_path = None
-                    if image_map and step.get('screenshot'):
+                    if image_map:
                         screenshot_path = find_image_for_step(
-                            step['screenshot'], image_map, display_sr_no, step_idx+1,
+                            step.get('screenshot', ''), image_map, display_sr_no, step_idx+1,
                             ip=vulnerability.get('ip', ''), severity=vulnerability.get('severity', '')
                         )
                     if screenshot_path and os.path.exists(screenshot_path):
@@ -2059,47 +2059,72 @@ def find_image_for_step(screenshot_name, image_map, sr_no, step_idx, ip=None, se
     Find image for a step using multiple matching strategies.
     Path format: POC Screenshots1/<IP>/<Severity>/<VUL-XXX>/stepN.png
     """
+    if not image_map:
+        return None
+        
     screenshot_name_key = screenshot_name.strip().lower() if screenshot_name else ''
-    sr_no_key = sr_no.strip().lower() if sr_no else ''
-    ip_key = ip.strip().lower() if ip else ''
-    severity_key = severity.strip().lower() if severity else ''
+    sr_no_key = sr_no.strip().lower().replace(' ', '') if sr_no else ''
+    ip_key = ip.strip().lower().replace(' ', '') if ip else ''
+    severity_key = severity.strip().lower().replace(' ', '') if severity else ''
+    step_num = step_idx
     
-    match = re.search(r'step(\d+)', screenshot_name_key)
-    if match:
-        step_num = int(match.group(1))
-    else:
-        step_num = step_idx
+    # Try to extract step number from screenshot name
+    if screenshot_name_key:
+        match = re.search(r'step\s*[_-]?(\d+)', screenshot_name_key)
+        if match:
+            step_num = int(match.group(1))
+    
+    print(f"[FIND_IMAGE] Looking for step {step_num} with SR: {sr_no_key}, IP: {ip_key}, Severity: {severity_key}")
     
     # Try multiple key combinations for matching
     possible_keys = [
-        # Full path with IP and severity
+        # Full path with IP and severity (matches index_images_from_poc_zip keys)
         f"{ip_key}_{severity_key}_{sr_no_key}_step{step_num}",
         f"{ip_key}_{sr_no_key}_step{step_num}",
         # Standard keys
         f"{sr_no_key}_step{step_num}",
         f"{sr_no_key}step{step_num}",
-        # Just step number
+        # Just step number variations
         f"step{step_num}",
         f"step{step_num}.png",
         f"step{step_num}.jpg",
+        f"step{step_num}.jpeg",
+        f"step {step_num}",
         # Screenshot name based
         screenshot_name_key,
         screenshot_name_key.replace('.png', '').replace('.jpg', '').replace('.jpeg', ''),
     ]
     
-    print(f"[FIND_IMAGE] Looking for step {step_num} with SR: {sr_no_key}, IP: {ip_key}, Severity: {severity_key}")
-    print(f"[FIND_IMAGE] Trying keys: {possible_keys}")
-    
+    # First pass: exact key match
     for key in possible_keys:
         if key and key in image_map:
-            print(f"[FIND_IMAGE] Found image for {key}: {image_map[key]}")
+            print(f"[FIND_IMAGE] Found image for key '{key}': {image_map[key]}")
             return image_map[key]
     
-    # Fallback: search for any key containing the sr_no and step number
+    # Second pass: search for any key containing sr_no and step number
+    if sr_no_key:
+        for map_key, path in image_map.items():
+            if sr_no_key in map_key and f"step{step_num}" in map_key:
+                print(f"[FIND_IMAGE] Fallback SR match: {map_key} -> {path}")
+                return path
+    
+    # Third pass: search for any key containing IP and step number
+    if ip_key:
+        for map_key, path in image_map.items():
+            if ip_key in map_key and f"step{step_num}" in map_key:
+                print(f"[FIND_IMAGE] Fallback IP match: {map_key} -> {path}")
+                return path
+    
+    # Fourth pass: just look for step number in the key
     for map_key, path in image_map.items():
-        if sr_no_key in map_key and f"step{step_num}" in map_key:
-            print(f"[FIND_IMAGE] Fallback match: {map_key} -> {path}")
-            return path
+        if f"step{step_num}" in map_key.lower() or f"step{step_num}." in map_key.lower():
+            # Make sure it's for the right vulnerability by checking sr_no or ip in path
+            if sr_no_key and sr_no_key in path.lower():
+                print(f"[FIND_IMAGE] Path match: {map_key} -> {path}")
+                return path
+            if ip_key and ip_key in path.lower():
+                print(f"[FIND_IMAGE] IP path match: {map_key} -> {path}")
+                return path
     
     print(f"[FIND_IMAGE] No image found for step {step_num}")
     return None
@@ -2746,12 +2771,11 @@ def create_no_vuln_box(doc, vulnerability, display_sr_no=None, image_map=None):
         run.font.name = 'Altone Trial'
         run.font.size = Pt(11)
         run.font.bold = False
-        # Insert PoC screenshot if available and valid
+        # Insert PoC screenshot - always try to find by SR and step number
         screenshot_path = None
-        screenshot_name = step.get('screenshot')
-        if image_map and isinstance(screenshot_name, str) and screenshot_name and screenshot_name.lower() != 'nan':
+        if image_map:
             screenshot_path = find_image_for_step(
-                screenshot_name, image_map, vulnerability.get('sr_no', display_sr_no), step_idx+1,
+                step.get('screenshot', ''), image_map, vulnerability.get('sr_no', display_sr_no), step_idx+1,
                 ip=vulnerability.get('ip', ''), severity=vulnerability.get('severity', '')
             )
         if screenshot_path and os.path.exists(screenshot_path):
@@ -2761,6 +2785,15 @@ def create_no_vuln_box(doc, vulnerability, display_sr_no=None, image_map=None):
             img_run = img_para.add_run()
             img_run.font.name = 'Altone Trial'
             img_run.add_picture(screenshot_path, width=Inches(5))
+        else:
+            # Show missing message
+            missing_para = cell.add_paragraph()
+            missing_para.paragraph_format.left_indent = Pt(20)
+            missing_para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = missing_para.add_run(f"[Screenshot missing: step{step_idx+1}]")
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(10)
+            run.font.italic = True
     return table
 
         # Replace [[document_id]] and {{document_id}} in all headers/footers with the actual document ID
