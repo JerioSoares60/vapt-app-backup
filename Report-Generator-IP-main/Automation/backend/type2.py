@@ -795,14 +795,28 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
                 for step_idx, step in enumerate(unique_steps):
                     step_para = cell.add_paragraph()
                     step_para.paragraph_format.left_indent = Pt(10)
-                    step_text = step['text']
-                    run = step_para.add_run(f"{step_text}")
+                    # Clean the step text to remove any existing "Step X:" prefix
+                    step_text = step['text'].strip()
+                    if step_text.lower().startswith('step'):
+                        step_text = re.sub(r'^step\s*\d*\s*[:\.\)]\s*', '', step_text, flags=re.IGNORECASE).strip()
+                    # Add step numbering: "Step X:" prefix
+                    run = step_para.add_run(f"Step {step_idx+1}: ")
+                    run.font.name = 'Altone Trial'
+                    run.font.size = Pt(11)
+                    run.font.bold = True
+                    run.font.color.rgb = RGBColor(font_r, font_g, font_b)
+                    # Add step content
+                    run = step_para.add_run(step_text)
                     run.font.name = 'Altone Trial'
                     run.font.size = Pt(11)
                     run.font.bold = False
+                    # Find and insert screenshot
                     screenshot_path = None
                     if image_map and step.get('screenshot'):
-                        screenshot_path = find_image_for_step(step['screenshot'], image_map, display_sr_no, step_idx+1)
+                        screenshot_path = find_image_for_step(
+                            step['screenshot'], image_map, display_sr_no, step_idx+1,
+                            ip=vulnerability.get('ip', ''), severity=vulnerability.get('severity', '')
+                        )
                     if screenshot_path and os.path.exists(screenshot_path):
                         print(f"[DEBUG] Adding image from ZIP: {screenshot_path}")
                         screenshot_para = cell.add_paragraph()
@@ -818,7 +832,7 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
                         run.font.name = 'Altone Trial'
                         run.font.size = Pt(10)
                         run.font.italic = True
-                    if step_idx < len(steps) - 1:
+                    if step_idx < len(unique_steps) - 1:
                         spacer = cell.add_paragraph()
                         spacer.paragraph_format.space_after = Pt(6)
     
@@ -2030,21 +2044,55 @@ def build_steps_with_images(steps_with_screenshots, image_map, tpl, sr_no):
         steps.append({'text': step['text'], 'image': image})
     return steps
 
-def find_image_for_step(screenshot_name, image_map, sr_no, step_idx):
-    screenshot_name_key = screenshot_name.strip().lower()
+def find_image_for_step(screenshot_name, image_map, sr_no, step_idx, ip=None, severity=None):
+    """
+    Find image for a step using multiple matching strategies.
+    Path format: POC Screenshots1/<IP>/<Severity>/<VUL-XXX>/stepN.png
+    """
+    screenshot_name_key = screenshot_name.strip().lower() if screenshot_name else ''
     sr_no_key = sr_no.strip().lower() if sr_no else ''
+    ip_key = ip.strip().lower() if ip else ''
+    severity_key = severity.strip().lower() if severity else ''
+    
     match = re.search(r'step(\d+)', screenshot_name_key)
     if match:
         step_num = int(match.group(1))
     else:
         step_num = step_idx
-    key = f"{sr_no_key}_step{step_num}"
-    print(f"Looking for key: {key} in image_map")
-    if key in image_map:
-        print(f"Found image for {key}: {image_map[key]}")
-    else:
-        print(f"Image for {key} NOT FOUND")
-    return image_map.get(key)
+    
+    # Try multiple key combinations for matching
+    possible_keys = [
+        # Full path with IP and severity
+        f"{ip_key}_{severity_key}_{sr_no_key}_step{step_num}",
+        f"{ip_key}_{sr_no_key}_step{step_num}",
+        # Standard keys
+        f"{sr_no_key}_step{step_num}",
+        f"{sr_no_key}step{step_num}",
+        # Just step number
+        f"step{step_num}",
+        f"step{step_num}.png",
+        f"step{step_num}.jpg",
+        # Screenshot name based
+        screenshot_name_key,
+        screenshot_name_key.replace('.png', '').replace('.jpg', '').replace('.jpeg', ''),
+    ]
+    
+    print(f"[FIND_IMAGE] Looking for step {step_num} with SR: {sr_no_key}, IP: {ip_key}, Severity: {severity_key}")
+    print(f"[FIND_IMAGE] Trying keys: {possible_keys}")
+    
+    for key in possible_keys:
+        if key and key in image_map:
+            print(f"[FIND_IMAGE] Found image for {key}: {image_map[key]}")
+            return image_map[key]
+    
+    # Fallback: search for any key containing the sr_no and step number
+    for map_key, path in image_map.items():
+        if sr_no_key in map_key and f"step{step_num}" in map_key:
+            print(f"[FIND_IMAGE] Fallback match: {map_key} -> {path}")
+            return path
+    
+    print(f"[FIND_IMAGE] No image found for step {step_num}")
+    return None
 
 # After parsing vulnerabilities, ensure each has a display_sr_no
 def assign_display_sr_no(vulnerabilities):
@@ -2692,7 +2740,10 @@ def create_no_vuln_box(doc, vulnerability, display_sr_no=None, image_map=None):
         screenshot_path = None
         screenshot_name = step.get('screenshot')
         if image_map and isinstance(screenshot_name, str) and screenshot_name and screenshot_name.lower() != 'nan':
-            screenshot_path = find_image_for_step(screenshot_name, image_map, vulnerability.get('sr_no', display_sr_no), step_idx+1)
+            screenshot_path = find_image_for_step(
+                screenshot_name, image_map, vulnerability.get('sr_no', display_sr_no), step_idx+1,
+                ip=vulnerability.get('ip', ''), severity=vulnerability.get('severity', '')
+            )
         if screenshot_path and os.path.exists(screenshot_path):
             img_para = cell.add_paragraph()
             img_para.paragraph_format.left_indent = Pt(20)
