@@ -30,9 +30,9 @@ def normalize_column_name(col: str) -> str:
 # Column mapping dictionary - maps various possible column names to standard keys
 COLUMN_MAPPINGS = {
     # Asset Information
-    'asset': ['asset', 'hostname', 'asset hostname', 'asset/hostname', 'host'],
-    'instant_purpose': ['instant purpose', 'purpose', 'asset purpose'],
-    'vapt_status': ['vapt status', 'status', 'assessment status'],
+    'asset': ['asset', 'hostname', 'asset hostname', 'asset/hostname', 'host', 'asset  hostname'],
+    'instant_purpose': ['instant purpose', 'purpose', 'asset purpose', 'instant_purpose'],
+    'vapt_status': ['vapt status', 'vapt_status', 'status', 'assessment status'],
     
     # Severity Counts (for asset-level summary)
     'critical_count': ['critical', 'critical count'],
@@ -43,23 +43,23 @@ COLUMN_MAPPINGS = {
     'total_count': ['total', 'total count', 'total vulnerabilities'],
     
     # Tester and Project Information
-    'tester_name': ['tester name', 'tester', 'auditor', 'auditor name', 'tested by'],
+    'tester_name': ['tester name', 'tester', 'tester_name', 'auditor', 'auditor name', 'tested by'],
     'project': ['project', 'project name', 'engagement'],
     'client': ['client', 'client name', 'organization'],
     
     # Vulnerability Details
-    'sr_no': ['sr no', 'sr.no', 'sr.no.', 'serial no', 'serial number', 's.no', 's no', 'no', '#'],
-    'observation': ['observation', 'title', 'vulnerability name', 'vuln name', 'finding'],
-    'severity': ['severity', 'risk', 'risk level', 'impact'],
+    'sr_no': ['sr no', 'sr no.', 'sr.no', 'sr.no.', 'serial no', 'serial number', 's.no', 's no', 'no', '#', 'vul id'],
+    'observation': ['observation', 'title', 'vulnerability name', 'vuln name', 'finding', 'observation/vulnerability'],
+    'severity': ['severity', 'risk', 'risk level'],
     'status': ['status', 'vuln status', 'finding status'],
-    'new_or_re': ['new or re', 'new re', 'type', 'finding type'],
+    'new_or_re': ['new or re', 'new re', 'new_or_re', 'type', 'finding type'],
     'cve_cwe': ['cve cwe', 'cve/cwe', 'cve', 'cwe', 'identifier'],
     'cvss': ['cvss', 'cvss score', 'score'],
-    'cvss_vector': ['cvss vector', 'cvss string', 'vector'],
-    'affected_asset': ['affected asset', 'affected system', 'vulnerable asset'],
+    'cvss_vector': ['cvss vector', 'cvss version', 'cvss string', 'vector'],
+    'affected_asset': ['affected asset', 'affected a', 'affected system', 'vulnerable asset'],
     'ip_url_app': ['ip url app', 'ip/url/app', 'target', 'endpoint', 'url', 'ip'],
-    'observation_vuln': ['observation vulnerability', 'observation/vulnerability', 'description', 'summary'],
-    'detailed_observation': ['detailed observation vulnerability', 'detailed observation', 'detailed description', 'details'],
+    'observation_vuln': ['observation vulnerability', 'observation/vulnerability', 'observation vuln', 'description', 'summary'],
+    'detailed_observation': ['detailed observation vulnerability', 'detailed observation', 'detailed observation vuln', 'detailed description', 'details'],
     'recommendation': ['recommendation', 'remediation', 'fix', 'solution', 'mitigation'],
     'reference': ['reference', 'references', 'links', 'external references'],
     'evidence': ['evidence proof of concept', 'evidence', 'proof of concept', 'poc', 'evidence / proof of concept'],

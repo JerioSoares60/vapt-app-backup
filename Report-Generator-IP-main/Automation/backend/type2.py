@@ -303,6 +303,44 @@ def parse_vulnerabilities_excel(file_path):
         
         # Clean column names by stripping whitespace
         df.columns = df.columns.str.strip()
+        
+        # Helper function to find column by various names
+        def find_col(names_list):
+            for name in names_list:
+                for col in df.columns:
+                    if col.lower().replace(' ', '').replace('_', '').replace('-', '') == name.lower().replace(' ', '').replace('_', '').replace('-', ''):
+                        return col
+            return None
+        
+        # Map new format column names to legacy names
+        col_vuln_name = find_col(['Observation', 'Vulnerability Name', 'Vuln Name', 'Finding', 'Title'])
+        col_sr_no = find_col(['Sr no', 'Sr No', 'Sr.No', 'Sr.No.', 'S.No', 'Serial No', 'VUL ID'])
+        col_hostname = find_col(['Asset/Hostname', 'Asset Hostname', 'Asset', 'Hostname', 'IP', 'Affected Asset'])
+        col_severity = find_col(['Severity', 'Risk', 'Risk Level'])
+        col_cvss = find_col(['CVSS', 'CVSS Score', 'Score'])
+        col_description = find_col(['Detailed Observation/Vulnerability', 'Detailed Observation', 'Description', 'Observation/Vulnerability'])
+        col_recommendation = find_col(['Recommendation', 'Remediation', 'Fix', 'Solution'])
+        col_reference = find_col(['Reference', 'References', 'Links'])
+        col_cve_cwe = find_col(['CVE/CWE', 'CVE CWE', 'CVE', 'CWE', 'Identifier'])
+        col_tester = find_col(['Tester_Name', 'Tester Name', 'Tester', 'ReportedBy', 'Reported By'])
+        col_project = find_col(['Project', 'Project Name', 'Engagement'])
+        col_evidence = find_col(['Evidence / Proof of Concept', 'Evidence', 'Proof of Concept', 'POC'])
+        col_ip_url = find_col(['IP/URL/App', 'IP URL App', 'Target', 'Endpoint', 'Affected A'])
+        
+        print(f"Column mapping (legacy fallback):")
+        print(f"  Vuln Name: {col_vuln_name}")
+        print(f"  Sr No: {col_sr_no}")
+        print(f"  Hostname/Asset: {col_hostname}")
+        print(f"  Severity: {col_severity}")
+        print(f"  CVSS: {col_cvss}")
+        print(f"  Description: {col_description}")
+        print(f"  Recommendation: {col_recommendation}")
+        print(f"  Reference: {col_reference}")
+        print(f"  CVE/CWE: {col_cve_cwe}")
+        print(f"  Tester: {col_tester}")
+        print(f"  Project: {col_project}")
+        print(f"  Evidence: {col_evidence}")
+        print(f"  IP/URL: {col_ip_url}")
 
         # Forward-fill identification/summary columns so multiple rows under the
         # same IP can omit repeated metadata (Hostname, counts etc.)
@@ -319,13 +357,15 @@ def parse_vulnerabilities_excel(file_path):
         for index, row in df.iterrows():
             try:
                 # Skip completely blank lines that do not carry a vulnerability entry
-                vn_raw = str(row.get('Vulnerability Name', '')).strip()
-                sr_raw = str(row.get('Sr No', '')).strip()
+                vn_raw = str(row.get(col_vuln_name, '') if col_vuln_name else row.get('Vulnerability Name', '')).strip()
+                sr_raw = str(row.get(col_sr_no, '') if col_sr_no else row.get('Sr No', '')).strip()
                 if vn_raw == '' and sr_raw == '':
                     continue
                 # Extract CVSS score and convert to float
                 cvss_score = None
-                if 'CVSS Score' in row:
+                if col_cvss and col_cvss in row:
+                    cvss_score = row[col_cvss]
+                elif 'CVSS Score' in row:
                     cvss_score = row['CVSS Score']
                 elif 'CVSS' in row:  # Also check for 'CVSS' column for backwards compatibility
                     cvss_score = row['CVSS']
@@ -364,15 +404,15 @@ def parse_vulnerabilities_excel(file_path):
                 severity = get_severity_from_cvss(cvss_score)
 
                 # Get vulnerability name
-                vuln_name = row.get('Vulnerability Name', '')
+                vuln_name = row.get(col_vuln_name, '') if col_vuln_name else row.get('Vulnerability Name', '')
                 def clean_str(s):
                     return str(s).strip().replace('\u200b', '').replace('\xa0', '').replace(' ', '').lower()
                 is_no_vuln_box = clean_str(vuln_name) in ['novulnerabilityfound', 'novulnerability']
                 
                 # For 'No Vulnerability' rows, allow missing/empty fields
                 if is_no_vuln_box:
-                    description = row.get('Description', '') or row.get('Vulnerability Description', '') or ''
-                    ip = row.get('Hostname', '')
+                    description = row.get(col_description, '') if col_description else (row.get('Description', '') or row.get('Vulnerability Description', '') or '')
+                    ip = row.get(col_hostname, '') if col_hostname else row.get('Hostname', '')
                     steps_with_screenshots = []
                     steps_text = str(row.get('Steps', '')).splitlines()
                     screenshot_cols = [col for col in df.columns if col.strip().lower().startswith('screenshot')]
@@ -394,7 +434,7 @@ def parse_vulnerabilities_excel(file_path):
                         'vulnerable_parameter': '',
                         'remediation': '',
                         'steps_with_screenshots': steps_with_screenshots,
-                        'sr_no': str(row.get('Sr No', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
+                        'sr_no': str(row.get(col_sr_no, f"VUL-{index+1:03d}") if col_sr_no else row.get('Sr No', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
                         'associated_cves': [],
                         'is_no_vuln_box': True,
                     }
@@ -403,12 +443,12 @@ def parse_vulnerabilities_excel(file_path):
                     continue  # Skip the rest of the parsing for this row
                 
                 # Use custom description or generate one based on vulnerability name
-                description = row.get('Description', '')
+                description = row.get(col_description, '') if col_description else row.get('Description', '')
                 if not description:
                     description = get_vulnerability_description(vuln_name)
                 
                 # Use custom remediation or generate one based on vulnerability name
-                remediation = row.get('Remediation', '')
+                remediation = row.get(col_recommendation, '') if col_recommendation else row.get('Remediation', '')
                 if not remediation:
                     remediation = get_vulnerability_recommendation(vuln_name)
                 
@@ -419,54 +459,94 @@ def parse_vulnerabilities_excel(file_path):
                 
                 # Get Associated CVEs (as a list)
                 associated_cves = []
-                # Robustly find the column for Associated CVEs (case-insensitive, ignore spaces and apostrophes)
-                cve_col = None
-                for col in df.columns:
-                    if col.strip().replace("'", "").replace(' ', '').lower() in [
-                        'associatedcves', 'associatedcve', 'associatedcvees', 'associatedcvees']:
-                        cve_col = col
-                        break
-                if cve_col and pd.notna(row.get(cve_col, None)):
-                    cve_str = str(row.get(cve_col, ''))
-                    print(f"[DEBUG] Row {index} Associated CVEs raw: {cve_str}")
+                # Use mapped column or find column for Associated CVEs
+                if col_cve_cwe and pd.notna(row.get(col_cve_cwe, None)):
+                    cve_str = str(row.get(col_cve_cwe, ''))
+                    print(f"[DEBUG] Row {index} CVE/CWE raw: {cve_str}")
                     # Split by comma, semicolon, or newline
                     associated_cves = [c.strip() for c in re.split(r'[\n,;]', cve_str) if c.strip()]
+                else:
+                    cve_col = None
+                    for col in df.columns:
+                        if col.strip().replace("'", "").replace(' ', '').lower() in [
+                            'associatedcves', 'associatedcve', 'associatedcvees', 'associatedcvees']:
+                            cve_col = col
+                            break
+                    if cve_col and pd.notna(row.get(cve_col, None)):
+                        cve_str = str(row.get(cve_col, ''))
+                        print(f"[DEBUG] Row {index} Associated CVEs raw: {cve_str}")
+                        associated_cves = [c.strip() for c in re.split(r'[\n,;]', cve_str) if c.strip()]
                 
                 # Get Reference Link
                 reference_link = ""
-                # Robustly find the column for Reference Link (case-insensitive, ignore spaces and apostrophes)
-                ref_link_col = None
-                for col in df.columns:
-                    if col.strip().replace("'", "").replace(' ', '').lower() in [
-                        'referencelink', 'referencelinks', 'refrencelink', 'refrencelinks', 'referencelink']:
-                        ref_link_col = col
-                        break
-                if ref_link_col and pd.notna(row.get(ref_link_col, None)):
-                    ref_link_str = str(row.get(ref_link_col, '')).strip()
+                if col_reference and pd.notna(row.get(col_reference, None)):
+                    ref_link_str = str(row.get(col_reference, '')).strip()
                     if ref_link_str and ref_link_str.lower() not in ['', 'nan', 'none', 'null']:
                         reference_link = ref_link_str
                         print(f"[DEBUG] Row {index} Reference Link: {reference_link}")
+                else:
+                    ref_link_col = None
+                    for col in df.columns:
+                        if col.strip().replace("'", "").replace(' ', '').lower() in [
+                            'referencelink', 'referencelinks', 'refrencelink', 'refrencelinks', 'referencelink']:
+                            ref_link_col = col
+                            break
+                    if ref_link_col and pd.notna(row.get(ref_link_col, None)):
+                        ref_link_str = str(row.get(ref_link_col, '')).strip()
+                        if ref_link_str and ref_link_str.lower() not in ['', 'nan', 'none', 'null']:
+                            reference_link = ref_link_str
+                            print(f"[DEBUG] Row {index} Reference Link: {reference_link}")
                 
                 # Get new dashboard columns
-                reported_by = str(row.get('ReportedBy', '')).strip() if pd.notna(row.get('ReportedBy', None)) else ''
-                project = str(row.get('Project', '')).strip() if pd.notna(row.get('Project', None)) else ''
-                severity_level = str(row.get('Severity', '')).strip() if pd.notna(row.get('Severity', None)) else ''
+                reported_by = ''
+                if col_tester and pd.notna(row.get(col_tester, None)):
+                    reported_by = str(row.get(col_tester, '')).strip()
+                elif pd.notna(row.get('ReportedBy', None)):
+                    reported_by = str(row.get('ReportedBy', '')).strip()
+                    
+                project_name = ''
+                if col_project and pd.notna(row.get(col_project, None)):
+                    project_name = str(row.get(col_project, '')).strip()
+                elif pd.notna(row.get('Project', None)):
+                    project_name = str(row.get('Project', '')).strip()
+                    
+                severity_level = ''
+                if col_severity and pd.notna(row.get(col_severity, None)):
+                    severity_level = str(row.get(col_severity, '')).strip()
+                elif pd.notna(row.get('Severity', None)):
+                    severity_level = str(row.get('Severity', '')).strip()
+                
+                # Get IP/hostname
+                ip_value = ''
+                if col_hostname and pd.notna(row.get(col_hostname, None)):
+                    ip_value = str(row.get(col_hostname, '')).strip()
+                elif col_ip_url and pd.notna(row.get(col_ip_url, None)):
+                    ip_value = str(row.get(col_ip_url, '')).strip()
+                elif pd.notna(row.get('Hostname', None)):
+                    ip_value = str(row.get('Hostname', '')).strip()
+                
+                # Get sr_no
+                sr_no_value = ''
+                if col_sr_no and pd.notna(row.get(col_sr_no, None)):
+                    sr_no_value = str(row.get(col_sr_no, f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip()
+                else:
+                    sr_no_value = str(row.get('Sr No', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip()
                 
                 vulnerability = {
                     'name': vuln_name,
                     'description': description,
                     'impact': impact,
-                    'severity': severity,
+                    'severity': severity if severity else severity_level,
                     'cvss': cvss_score,
-                    'ip': row.get('Hostname', ''),
+                    'ip': ip_value,
                     'vulnerable_parameter': vulnerable_parameter,
                     'remediation': remediation,
                     'steps_with_screenshots': steps_with_screenshots,
-                    'sr_no': str(row.get('Sr No', f"VUL-{index+1:03d}")).replace('VULN-', 'VUL-').strip(),
+                    'sr_no': sr_no_value,
                     'associated_cves': associated_cves,
                     'reference_link': reference_link,
                     'reported_by': reported_by,
-                    'project': project,
+                    'project': project_name,
                     'severity_level': severity_level,
                     'is_no_vuln_box': is_no_vuln_box,
                     'row_order': int(index),
