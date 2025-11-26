@@ -267,7 +267,9 @@ def generate_vulnerability_sections(vulnerabilities, poc_mapping):
         
         print(f"Extracted - Title: {title}, CVE: {cve_cwe}, Asset: {affected_asset}")
         
-        # Parse evidence steps from Excel
+        # Parse evidence steps from Excel - ensure evidence_text is a string
+        if not isinstance(evidence_text, str):
+            evidence_text = str(evidence_text) if evidence_text and not (isinstance(evidence_text, float) and pd.isna(evidence_text)) else ''
         evidence_steps = parse_evidence_steps(evidence_text)
         
         # Get PoC images for this observation
@@ -293,7 +295,7 @@ def generate_vulnerability_sections(vulnerabilities, poc_mapping):
         
         # Process recommendations
         recommendations_list = []
-        if recommendation:
+        if recommendation and isinstance(recommendation, str):
             rec_lines = [line.strip() for line in recommendation.split('\n') if line.strip()]
             for line in rec_lines:
                 clean_line = re.sub(r'^\d+\.\s*', '', line)
