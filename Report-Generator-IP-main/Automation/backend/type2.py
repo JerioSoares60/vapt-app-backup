@@ -805,21 +805,28 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
                 for step_idx, step in enumerate(unique_steps):
                     step_para = cell.add_paragraph()
                     step_para.paragraph_format.left_indent = Pt(10)
-                    # Clean the step text to remove any existing "Step X:" prefix
+                    # Keep the original step text from Excel (includes Step 1:, Step 2: etc.)
                     step_text = step['text'].strip()
-                    if step_text.lower().startswith('step'):
-                        step_text = re.sub(r'^step\s*\d*\s*[:\.\)]\s*', '', step_text, flags=re.IGNORECASE).strip()
-                    # Add step numbering: "Step X:" prefix
-                    run = step_para.add_run(f"Step {step_idx+1}: ")
-                    run.font.name = 'Altone Trial'
-                    run.font.size = Pt(11)
-                    run.font.bold = True
-                    run.font.color.rgb = RGBColor(font_r, font_g, font_b)
-                    # Add step content
-                    run = step_para.add_run(step_text)
-                    run.font.name = 'Altone Trial'
-                    run.font.size = Pt(11)
-                    run.font.bold = False
+                    # Check if step already has "Step X:" prefix
+                    has_step_prefix = bool(re.match(r'^step\s*\d+\s*[:\.\)]\s*', step_text, re.IGNORECASE))
+                    if has_step_prefix:
+                        # Use text as-is from Excel
+                        run = step_para.add_run(step_text)
+                        run.font.name = 'Altone Trial'
+                        run.font.size = Pt(11)
+                        run.font.bold = False
+                    else:
+                        # Add step numbering: "Step X:" prefix
+                        run = step_para.add_run(f"Step {step_idx+1}: ")
+                        run.font.name = 'Altone Trial'
+                        run.font.size = Pt(11)
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(font_r, font_g, font_b)
+                        # Add step content
+                        run = step_para.add_run(step_text)
+                        run.font.name = 'Altone Trial'
+                        run.font.size = Pt(11)
+                        run.font.bold = False
                     # Find and insert screenshot - always try to find by SR and step number
                     screenshot_path = None
                     if image_map:
@@ -871,6 +878,14 @@ def create_vulnerability_table(doc, vulnerability, display_sr_no=None, image_map
         run.font.name = 'Altone Trial'
         run.font.size = Pt(11)
         run.font.bold = False
+    
+    # Add separator line between Associated CVEs and Reference Link
+    separator_para = cell.add_paragraph()
+    separator_para.paragraph_format.space_before = Pt(6)
+    separator_para.paragraph_format.space_after = Pt(6)
+    sep_run = separator_para.add_run("─" * 80)  # Horizontal line separator
+    sep_run.font.size = Pt(8)
+    sep_run.font.color.rgb = RGBColor(180, 180, 180)  # Light gray color
     
     # Add Reference Link after Associated CVEs (only if it exists and is not empty)
     reference_link = vulnerability.get('reference_link', '')
@@ -2761,13 +2776,16 @@ def create_no_vuln_box(doc, vulnerability, display_sr_no=None, image_map=None):
     for step_idx, step in enumerate(unique_steps):
         step_para = cell.add_paragraph()
         step_para.paragraph_format.left_indent = Pt(10)
-        # Clean the step text to remove any existing "Step X:" prefix
+        # Keep the original step text from Excel (includes Step 1:, Step 2: etc.)
         step_text = step['text'].strip()
-        if step_text.lower().startswith('step'):
-            # Remove "Step X:" prefix if it exists
-            import re
-            step_text = re.sub(r'^step\s*\d*\s*:\s*', '', step_text, flags=re.IGNORECASE).strip()
-        run = step_para.add_run(f"Step {step_idx+1}: {step_text}")
+        # Check if step already has "Step X:" prefix
+        has_step_prefix = bool(re.match(r'^step\s*\d+\s*[:\.\)]\s*', step_text, re.IGNORECASE))
+        if has_step_prefix:
+            # Use text as-is from Excel
+            run = step_para.add_run(step_text)
+        else:
+            # Add step numbering
+            run = step_para.add_run(f"Step {step_idx+1}: {step_text}")
         run.font.name = 'Altone Trial'
         run.font.size = Pt(11)
         run.font.bold = False
