@@ -149,14 +149,10 @@ def safe_get_value(row: pd.Series, col_name: Optional[str], default: Any = '') -
     return value
 
 
-def parse_excel_data(excel_file_path: str, sheet_name: str = None) -> Dict[str, Any]:
+def parse_excel_data(excel_file_path: str) -> Dict[str, Any]:
     """
     Parse the standardized Excel format and extract all relevant data.
-    
-    Args:
-        excel_file_path: Path to the Excel file
-        sheet_name: Name of the sheet to read (e.g., 'Web', 'IP', 'Cert-IN'). 
-                    If None, reads the first sheet.
+    Each report type uploads its own Excel file with the same format.
     
     Returns a dictionary containing:
     - metadata: Dict with client, project, tester info
@@ -165,28 +161,9 @@ def parse_excel_data(excel_file_path: str, sheet_name: str = None) -> Dict[str, 
     - raw_df: The original DataFrame for custom processing
     """
     
-    # Read the Excel file (specific sheet if provided)
-    if sheet_name:
-        # Get all sheet names from the Excel file
-        xl = pd.ExcelFile(excel_file_path)
-        available_sheets = xl.sheet_names
-        print(f"📊 Available sheets in Excel: {available_sheets}")
-        
-        # Find matching sheet (case-insensitive)
-        target_sheet = None
-        for s in available_sheets:
-            if s.lower() == sheet_name.lower():
-                target_sheet = s
-                break
-        
-        if target_sheet:
-            df = pd.read_excel(excel_file_path, sheet_name=target_sheet)
-            print(f"📊 Reading sheet: '{target_sheet}'")
-        else:
-            raise ValueError(f"Sheet '{sheet_name}' not found. Available sheets: {available_sheets}")
-    else:
-        df = pd.read_excel(excel_file_path)
-        print(f"📊 Reading first sheet")
+    # Read the Excel file (first sheet - each report type has its own Excel file)
+    df = pd.read_excel(excel_file_path)
+    print(f"📊 Reading Excel file")
     
     print(f"📊 Excel file loaded: {len(df)} rows, {len(df.columns)} columns")
     print(f"📋 Available columns: {list(df.columns)}")
