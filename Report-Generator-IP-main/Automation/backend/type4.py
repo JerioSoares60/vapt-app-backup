@@ -223,89 +223,19 @@ def normalize_filename(fname):
 # Function to parse the uploaded Excel file for vulnerability data
 def parse_vulnerabilities_excel(file_path):
     """
-    Parse the uploaded Excel file using standardized parser and return vulnerability data.
+    Parse the uploaded Excel file and return vulnerability data.
+    Supports the standardized format with headers in row 1.
     Returns (vulnerabilities_list, metadata_dict)
     """
     print(f"Parsing vulnerability data from: {file_path}")
     
-    try:
-        # Try to use standardized parser first
-        try:
-            parsed_data = parse_excel_data(file_path)
-            print(f"✅ Using standardized Excel parser (Web sheet)")
-            print(f"   Metadata: {parsed_data['metadata']}")
-            print(f"   Vulnerabilities: {len(parsed_data['vulnerabilities'])}")
-            
-            vulnerabilities = []
-            for index, vuln in enumerate(parsed_data['vulnerabilities']):
-                # Convert steps to steps_with_screenshots format
-                steps_with_screenshots = []
-                if vuln.get('steps'):
-                    for step in vuln['steps']:
-                        steps_with_screenshots.append({
-                            'text': step['content'],
-                            'screenshot': vuln['screenshots'][step['number']-1] if len(vuln.get('screenshots', [])) >= step['number'] else ''
-                        })
-                
-                # Convert to type4 format
-                cvss_score = vuln.get('cvss', None)
-                try:
-                    if cvss_score:
-                        cvss_score = float(cvss_score)
-                except:
-                    cvss_score = None
-                
-                severity = vuln.get('severity', 'Medium')
-                
-                vulnerability = {
-                    'name': vuln.get('observation', ''),
-                    'description': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
-                    'impact': '',  # Not in standardized format
-                    'severity': severity,
-                    'severity_display': severity,
-                    'cvss': cvss_score,
-                    'vulnerable_url': vuln.get('ip_url_app', ''),
-                    'vulnerable_parameter': '',  # Not in standardized format
-                    'remediation': vuln.get('recommendation', ''),
-                    'steps_with_screenshots': steps_with_screenshots,
-                    'sr_no': str(vuln.get('sr_no', f"{index+1}")),
-                    'reference_link': vuln.get('reference', ''),
-                    'cwe_id': vuln.get('cve_cwe', ''),
-                }
-                
-                vulnerabilities.append(vulnerability)
-                print(f"Parsed vulnerability Sr No: {vulnerability['sr_no']} at index {index}")
-            
-            # Return vulnerabilities and metadata
-            vuln_metadata = {
-                'engagement_url': '',  # Not in standardized format yet
-                'client': parsed_data['metadata']['client'],
-                'project': parsed_data['metadata']['project'],
-                'tester': parsed_data['metadata']['tester']
-            }
-            
-            print(f"Total vulnerabilities extracted (standardized parser): {len(vulnerabilities)}")
-            return vulnerabilities, vuln_metadata
-            
-        except Exception as std_parse_error:
-            print(f"⚠️  Standardized parser failed, falling back to legacy parser: {std_parse_error}")
-            traceback.print_exc()
-    
-        # Fallback to original parsing logic
-        engagement_url = ""
-        # Read the first four rows without headers to capture the URL on row 4
-        preview_df = pd.read_excel(file_path, header=None, nrows=4)
-        if preview_df.shape[0] >= 4 and preview_df.shape[1] >= 2:
-            engagement_url = str(preview_df.iloc[3, 1]).strip()
-            print(f"Extracted engagement URL: {engagement_url}")
-    except Exception as meta_err:
-        print(f"Warning: Unable to read engagement URL row: {meta_err}")
-        engagement_url = ""
+    engagement_url = ""
     
     try:
-        # Skip the first four rows (metadata) so row 5 becomes our header
-        df = pd.read_excel(file_path, header=4)
+        # Read Excel with header in row 1 (index 0)
+        df = pd.read_excel(file_path, header=0)
         print(f"Vulnerability Excel file read successfully. Columns: {df.columns.tolist()}")
+        print(f"Total rows: {len(df)}")
         
         # Clean column names by stripping whitespace
         df.columns = df.columns.str.strip()
@@ -370,61 +300,128 @@ def parse_vulnerabilities_excel(file_path):
                 'screenshot': screenshot_filename or ""
             }
         
+        # Helper to find column by various names (case-insensitive, partial match)
+        def find_col(names_list):
+            for name in names_list:
+                for col in df.columns:
+                    col_clean = col.lower().replace(' ', '').replace('_', '').replace('-', '').replace('/', '')
+                    name_clean = name.lower().replace(' ', '').replace('_', '').replace('-', '').replace('/', '')
+                    if col_clean == name_clean or col_clean.startswith(name_clean) or name_clean.startswith(col_clean):
+                        return col
+            return None
+        
+        # Map column names
+        col_sr_no = find_col(['Sr no', 'Sr No', 'Sr.No', 'Sr. No.', 'S.No', 'Serial No', 'VUL ID'])
+        col_observation = find_col(['Observation', 'Name of Vulnerability', 'Vulnerability Name', 'Finding', 'Title'])
+        col_severity = find_col(['Severity', 'Risk(Severity)', 'Risk', 'Risk Level'])
+        col_cvss = find_col(['CVSS', 'CVSS Score', 'Score'])
+        col_affected_url = find_col(['Affected A', 'Affected Asset', 'IP/URL/App', 'Affected URL', 'Vulnerable URL', 'URL'])
+        col_description = find_col(['Detailed Observation', 'Detailed O', 'Observation/Vulnerability', 'Audit Observation', 'Description'])
+        col_recommendation = find_col(['Recommendation', 'Recomme', 'Remediation', 'Fix'])
+        col_reference = find_col(['Reference', 'Reference Link', 'References'])
+        col_cwe = find_col(['CVE/CWE', 'CVE CWE', 'CWE ID', 'CWE', 'CVE'])
+        col_evidence = find_col(['Evidence / Proof of Concept', 'Evidence', 'Proof of Concept', 'POC'])
+        
+        # Find screenshot columns
+        screenshot_cols = [col for col in df.columns if 'screenshot' in col.lower()]
+        
+        print(f"Column mapping:")
+        print(f"  Sr No: {col_sr_no}")
+        print(f"  Observation: {col_observation}")
+        print(f"  Severity: {col_severity}")
+        print(f"  CVSS: {col_cvss}")
+        print(f"  Affected URL: {col_affected_url}")
+        print(f"  Description: {col_description}")
+        print(f"  Recommendation: {col_recommendation}")
+        print(f"  Reference: {col_reference}")
+        print(f"  CVE/CWE: {col_cwe}")
+        print(f"  Evidence: {col_evidence}")
+        print(f"  Screenshot columns: {screenshot_cols}")
+        
         for index, row in df.iterrows():
             if row.dropna(how='all').empty:
                 continue  # Skip completely empty rows
             try:
-                sr_raw = row.get('Sr. No.', row.get('Sr No', ''))
-                if not has_valid_sr_no(sr_raw):
-                    print(f"Skipping row {index} due to missing/invalid Sr. No.: {sr_raw}")
-                    continue
+                # Get Sr No
+                sr_raw = row.get(col_sr_no, '') if col_sr_no else ''
                 sr_no_value = clean_value(sr_raw)
+                if not sr_no_value:
+                    sr_no_value = f"VUL-{index+1:03d}"
                 
-                vuln_name = clean_value(
-                    row.get('Name of Vulnerability', row.get('Vulnerability Name', ''))
-                )
+                # Get vulnerability name/observation
+                vuln_name = clean_value(row.get(col_observation, '')) if col_observation else ''
                 if not vuln_name:
                     print(f"Skipping row {index} due to missing vulnerability name.")
                     continue
                 
-                cvss_score = extract_cvss_score(row.get('CVSS') or row.get('CVSS Score'))
+                # Get CVSS score
+                cvss_score = extract_cvss_score(row.get(col_cvss, '')) if col_cvss else None
                 
-                # Determine severity: prefer numeric CVSS, fallback to Risk(Severity) text
-                risk_text = clean_value(row.get('Risk(Severity)', ''))
-                if risk_text:
-                    severity = risk_text.title()
+                # Get severity
+                severity_text = clean_value(row.get(col_severity, '')) if col_severity else ''
+                if severity_text:
+                    severity = severity_text.title()
                     severity_display = severity
                 elif cvss_score is not None:
                     severity = get_severity_from_cvss(cvss_score)
                     severity_display = severity
                 else:
-                    severity = "Unknown"
-                    severity_display = ""
+                    severity = "Medium"
+                    severity_display = "Medium"
                 
-                vulnerable_url = value_or_empty(
-                    row.get('Affected URL', row.get('Vulnerable URL', ''))
-                )
+                # Get affected URL
+                vulnerable_url = value_or_empty(row.get(col_affected_url, '')) if col_affected_url else ''
                 
-                vulnerable_parameter = value_or_empty(row.get('Vulnerable Parameter', ''))
+                vulnerable_parameter = ''
                 
-                description = value_or_empty(
-                    row.get('Audit Observation', row.get('Description', ''))
-                )
+                # Get description
+                description = value_or_empty(row.get(col_description, '')) if col_description else ''
                 
-                impact = value_or_empty(row.get('Impact', ''))
+                impact = ''
                 
-                remediation = value_or_empty(
-                    row.get('Recommendation', row.get('Remediation', ''))
-                )
+                # Get recommendation
+                remediation = value_or_empty(row.get(col_recommendation, '')) if col_recommendation else ''
                 
-                reference_link = value_or_empty(row.get('Reference Link', ''))
-                cwe_id = value_or_empty(row.get('CWE ID', row.get('CWE', '')))
+                # Get reference
+                reference_link = value_or_empty(row.get(col_reference, '')) if col_reference else ''
                 
+                # Get CWE/CVE
+                cwe_id = value_or_empty(row.get(col_cwe, '')) if col_cwe else ''
+                
+                # Parse steps from Evidence column or POC columns
                 steps_with_screenshots = []
-                for step_idx, poc_col in enumerate(poc_columns, 1):
-                    poc_entry = parse_poc_value(row.get(poc_col, ''), "")
-                    if poc_entry:
-                        steps_with_screenshots.append(poc_entry)
+                
+                # First try Evidence column
+                evidence_text = value_or_empty(row.get(col_evidence, '')) if col_evidence else ''
+                if evidence_text:
+                    # Parse "Step 1: ...", "Step 2: ..." from evidence text
+                    step_pattern = re.compile(r'Step\s*(\d+)\s*[:\-\.]?\s*(.*?)(?=Step\s*\d+|$)', re.IGNORECASE | re.DOTALL)
+                    step_matches = step_pattern.findall(str(evidence_text))
+                    for step_num_str, step_content in step_matches:
+                        content = step_content.strip()
+                        if content:
+                            steps_with_screenshots.append({
+                                'text': content,
+                                'screenshot': ''
+                            })
+                
+                # If no steps from evidence, try POC columns
+                if not steps_with_screenshots:
+                    for step_idx, poc_col in enumerate(poc_columns, 1):
+                        poc_entry = parse_poc_value(row.get(poc_col, ''), "")
+                        if poc_entry:
+                            steps_with_screenshots.append(poc_entry)
+                
+                # Get screenshots from screenshot columns
+                for idx, screenshot_col in enumerate(screenshot_cols):
+                    screenshot_val = clean_value(row.get(screenshot_col, ''))
+                    if screenshot_val and idx < len(steps_with_screenshots):
+                        steps_with_screenshots[idx]['screenshot'] = screenshot_val
+                    elif screenshot_val:
+                        steps_with_screenshots.append({
+                            'text': f'Step {len(steps_with_screenshots)+1}',
+                            'screenshot': screenshot_val
+                        })
                 
                 vulnerability = {
                     'name': vuln_name,
