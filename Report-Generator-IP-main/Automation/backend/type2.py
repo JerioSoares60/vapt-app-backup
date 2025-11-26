@@ -328,9 +328,13 @@ def parse_vulnerabilities_excel(file_path):
                 sr_no_value = sr_no_raw if sr_no_raw else f"VUL-{index+1:03d}"
                 sr_no_value = sr_no_value.replace('VULN-', 'VUL-')
                 
-                # Check for "No Vulnerability Found" entries
+                # Check for "No Vulnerability Found" or "Target not Reachable" entries
                 clean_name = vuln_name.lower().replace(' ', '').replace('\u200b', '').replace('\xa0', '')
-                is_no_vuln_box = clean_name in ['novulnerabilityfound', 'novulnerability', 'novulnfound']
+                is_no_vuln_box = clean_name in [
+                    'novulnerabilityfound', 'novulnerability', 'novulnfound', 'novuln',
+                    'targetnotreachable', 'notreachable', 'unreachable', 'hostdown',
+                    'hostunreachable', 'nofindings', 'nofindingsfound'
+                ] or 'novuln' in clean_name or 'notreachable' in clean_name or 'unreachable' in clean_name
                 
                 # Get IP/hostname - try multiple columns
                 ip_value = clean_value(row.get(col_map['hostname'], ''))
@@ -341,8 +345,14 @@ def parse_vulnerabilities_excel(file_path):
                 severity_text = clean_value(row.get(col_map['severity'], ''))
                 cvss_score = extract_cvss_score(row.get(col_map['cvss'], ''))
                 
+                # Also check if severity indicates "No Vulnerability"
                 if severity_text:
-                    severity = severity_text.title()
+                    severity_lower = severity_text.lower().replace(' ', '')
+                    if 'novuln' in severity_lower or severity_lower == 'n/a' or severity_lower == 'na':
+                        is_no_vuln_box = True
+                        severity = "No Vulnerability"
+                    else:
+                        severity = severity_text.title()
                 elif cvss_score is not None:
                     severity = get_severity_from_cvss(cvss_score)
                 else:
