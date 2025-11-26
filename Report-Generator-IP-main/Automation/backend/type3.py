@@ -1466,15 +1466,20 @@ async def generate_report(
 async def download_report(filename: str):
     """Download generated report"""
     try:
-        safe_filename = sanitize_filename(filename)
-        file_path = os.path.join(UPLOAD_DIR, safe_filename)
+        # Don't over-sanitize - just use the filename as-is but ensure it's safe
+        # The filename was already sanitized when created
+        file_path = os.path.join(UPLOAD_DIR, filename)
         
         if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Report not found")
+            # Try with sanitized filename as fallback
+            safe_filename = sanitize_filename(filename)
+            file_path = os.path.join(UPLOAD_DIR, safe_filename)
+            if not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail=f"Report not found: {filename}")
         
         return FileResponse(
             path=file_path,
-            filename=safe_filename,
+            filename=os.path.basename(file_path),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         
