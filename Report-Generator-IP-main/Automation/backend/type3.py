@@ -348,8 +348,8 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
         'Critical': {'bg': '800000', 'text': 'FFFFFF'},
         'High': {'bg': 'FF0000', 'text': 'FFFFFF'},
         'Medium': {'bg': 'FFC000', 'text': '000000'},
-        'Low': {'bg': 'FFFF00', 'text': '000000'},
-        'Informational': {'bg': '92D050', 'text': 'FFFFFF'}
+        'Low': {'bg': '92D050', 'text': 'FFFFFF'},
+        'Informational': {'bg': '00B0F0', 'text': 'FFFFFF'}
     }
     colors = severity_colors.get(severity, severity_colors['Medium'])
 
@@ -654,9 +654,23 @@ def create_asset_findings_table(doc, vulnerability_data):
         4: '800000',  # Critical - Dark Red/Maroon
         5: 'FF0000',  # High - Red
         6: 'FFC000',  # Medium - Orange
-        7: 'FFFF00',  # Low - Yellow
-        8: '92D050',  # Informational - Green
-        9: '00B0F0'   # Total - Blue
+        7: '92D050',  # Low - Green
+        8: '00B0F0',  # Informational - Blue
+        9: '7030A0'   # Total - Purple
+    }
+    
+    # Header colors: first 4 columns purple, then severity colors for each column
+    header_colors = {
+        0: '6923D0',  # Sr. No. - Purple
+        1: '6923D0',  # Asset/Hostname - Purple
+        2: '6923D0',  # Instant purpose - Purple
+        3: '6923D0',  # VAPT Status - Purple
+        4: '800000',  # Critical - Dark Red
+        5: 'FF0000',  # High - Red
+        6: 'FFC000',  # Medium - Orange
+        7: '92D050',  # Low - Green
+        8: '00B0F0',  # Informational - Blue
+        9: '7030A0'   # Total - Purple
     }
     
     for idx, header_text in enumerate(headers):
@@ -670,8 +684,9 @@ def create_asset_findings_table(doc, vulnerability_data):
         run.font.bold = True
         run.font.color.rgb = RGBColor(255, 255, 255)
         
-        # Purple header background
-        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="6923D0"/>')
+        # Apply color based on column
+        color = header_colors.get(idx, '6923D0')
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
         cell._element.get_or_add_tcPr().append(shading)
     
     # Data rows
@@ -699,9 +714,9 @@ def create_asset_findings_table(doc, vulnerability_data):
             (4, counts['critical'], '800000'),
             (5, counts['high'], 'FF0000'),
             (6, counts['medium'], 'FFC000'),
-            (7, counts['low'], 'FFFF00'),
-            (8, counts['informational'], '92D050'),
-            (9, counts['total'], '00B0F0')
+            (7, counts['low'], '92D050'),
+            (8, counts['informational'], '00B0F0'),
+            (9, counts['total'], '7030A0')
         ]
         
         for col_idx, val, color in severity_vals:
@@ -731,9 +746,9 @@ def create_asset_findings_table(doc, vulnerability_data):
         (4, overall['critical'], '800000'),
         (5, overall['high'], 'FF0000'),
         (6, overall['medium'], 'FFC000'),
-        (7, overall['low'], 'FFFF00'),
-        (8, overall['informational'], '92D050'),
-        (9, overall['total'], '00B0F0')
+        (7, overall['low'], '92D050'),
+        (8, overall['informational'], '00B0F0'),
+        (9, overall['total'], '7030A0')
     ]
     
     for col_idx, val, color in overall_vals:
@@ -841,6 +856,17 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
                         break
                 
                 if graph_idx is not None:
+                    # Remove blank paragraphs between Risk Level Description and Graph
+                    # Find and remove empty paragraphs
+                    body = doc._body._body
+                    paragraphs_to_check = list(doc.paragraphs[risk_level_idx+1:graph_idx])
+                    for para in paragraphs_to_check:
+                        if not para.text.strip():
+                            # Check if it's a page break paragraph
+                            para_xml = para._element.xml
+                            if 'w:br' in para_xml and 'w:type="page"' in para_xml:
+                                para._element.getparent().remove(para._element)
+                    
                     # Insert table element before the graph paragraph
                     table = create_asset_findings_table(doc, vulnerability_data)
                     if table is not None:
@@ -852,6 +878,9 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
                     create_asset_findings_table(doc, vulnerability_data)
             else:
                 create_asset_findings_table(doc, vulnerability_data)
+            
+            # Remove any blank pages/paragraphs before adding Detailed Observations
+            # Find last element and check for empty paragraphs
             
             # Detailed Observations heading on new page
             doc.add_page_break()
