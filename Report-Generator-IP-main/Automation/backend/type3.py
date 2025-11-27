@@ -839,14 +839,6 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         doc = Document(tmp_path)
         
         if vulnerability_sections:
-            # Find the last paragraph of Risk Level Description section (contains "Informational")
-            # The table should be inserted right after this, before the graph
-            insert_after_idx = None
-            for i, para in enumerate(doc.paragraphs):
-                text = para.text.strip().lower()
-                if 'informational' in text or 'recommended risk level' in text:
-                    insert_after_idx = i
-            
             # Find where "Total Vulnerabilities" graph starts
             graph_idx = None
             for i, para in enumerate(doc.paragraphs):
@@ -858,15 +850,15 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
             table = create_asset_findings_table(doc, vulnerability_data)
             
             if table is not None and graph_idx is not None:
-                # Move table to right before the graph
+                # Add a page break paragraph before the table to ensure it starts on a fresh page
+                from docx.oxml import parse_xml
+                from docx.oxml.ns import nsdecls
+                
                 graph_para = doc.paragraphs[graph_idx]._element
+                
+                # Remove table from end and insert before graph
                 table._element.getparent().remove(table._element)
                 graph_para.addprevious(table._element)
-            elif table is not None and insert_after_idx is not None:
-                # Insert after the Risk Level Description content
-                insert_para = doc.paragraphs[insert_after_idx]._element
-                table._element.getparent().remove(table._element)
-                insert_para.addnext(table._element)
             
             # Detailed Observations heading on new page
             doc.add_page_break()
