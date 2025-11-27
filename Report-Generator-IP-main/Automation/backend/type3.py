@@ -801,9 +801,19 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         final_client_name = data.get('client_name', '') or client_name_from_excel
         final_report_name = data.get('report_name', '') or project_name_from_excel
         
+        print(f"📝 Form client_name: '{data.get('client_name', '')}', Final: '{final_client_name}'")
+        print(f"📝 Form report_name: '{data.get('report_name', '')}', Final: '{final_report_name}'")
+        
         context = {
             'CLIENT_NAME': final_client_name,
             'REPORT_NAME': final_report_name,
+            # Also add variations in case template uses different format
+            'CLIENT__NAME': final_client_name,
+            'REPORT__NAME': final_report_name,
+            'CLIENT_NAME_': final_client_name,
+            'REPORT_NAME_': final_report_name,
+            '_CLIENT_NAME': final_client_name,
+            '_REPORT_NAME': final_report_name,
             'REPORT_RELEASE_DATE': data.get('report_release_date', ''),
             'TYPE_OF_AUDIT': data.get('type_of_audit', ''),
             'TYPE_OF_AUDIT_REPORT': data.get('type_of_audit_report', ''),
