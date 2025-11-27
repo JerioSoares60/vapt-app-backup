@@ -839,48 +839,34 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         doc = Document(tmp_path)
         
         if vulnerability_sections:
-            # Find the "Risk Level Description" paragraph and insert table after it
-            risk_level_idx = None
+            # Find the last paragraph of Risk Level Description section (contains "Informational")
+            # The table should be inserted right after this, before the graph
+            insert_after_idx = None
             for i, para in enumerate(doc.paragraphs):
-                if 'Risk Level Description' in para.text:
-                    risk_level_idx = i
+                text = para.text.strip().lower()
+                if 'informational' in text or 'recommended risk level' in text:
+                    insert_after_idx = i
+            
+            # Find where "Total Vulnerabilities" graph starts
+            graph_idx = None
+            for i, para in enumerate(doc.paragraphs):
+                if 'Total Vulnerabilities' in para.text:
+                    graph_idx = i
                     break
             
-            if risk_level_idx is not None:
-                # Find the next page/section after Risk Level Description content
-                # Look for "Total Vulnerabilities" or similar to find where graph starts
-                graph_idx = None
-                for i, para in enumerate(doc.paragraphs):
-                    if 'Total Vulnerabilities' in para.text:
-                        graph_idx = i
-                        break
-                
-                if graph_idx is not None:
-                    # Remove blank paragraphs between Risk Level Description and Graph
-                    # Find and remove empty paragraphs
-                    body = doc._body._body
-                    paragraphs_to_check = list(doc.paragraphs[risk_level_idx+1:graph_idx])
-                    for para in paragraphs_to_check:
-                        if not para.text.strip():
-                            # Check if it's a page break paragraph
-                            para_xml = para._element.xml
-                            if 'w:br' in para_xml and 'w:type="page"' in para_xml:
-                                para._element.getparent().remove(para._element)
-                    
-                    # Insert table element before the graph paragraph
-                    table = create_asset_findings_table(doc, vulnerability_data)
-                    if table is not None:
-                        # Move table to before the graph
-                        graph_para = doc.paragraphs[graph_idx]._element
-                        table._element.getparent().remove(table._element)
-                        graph_para.addprevious(table._element)
-                else:
-                    create_asset_findings_table(doc, vulnerability_data)
-            else:
-                create_asset_findings_table(doc, vulnerability_data)
+            # Create the table
+            table = create_asset_findings_table(doc, vulnerability_data)
             
-            # Remove any blank pages/paragraphs before adding Detailed Observations
-            # Find last element and check for empty paragraphs
+            if table is not None and graph_idx is not None:
+                # Move table to right before the graph
+                graph_para = doc.paragraphs[graph_idx]._element
+                table._element.getparent().remove(table._element)
+                graph_para.addprevious(table._element)
+            elif table is not None and insert_after_idx is not None:
+                # Insert after the Risk Level Description content
+                insert_para = doc.paragraphs[insert_after_idx]._element
+                table._element.getparent().remove(table._element)
+                insert_para.addnext(table._element)
             
             # Detailed Observations heading on new page
             doc.add_page_break()
