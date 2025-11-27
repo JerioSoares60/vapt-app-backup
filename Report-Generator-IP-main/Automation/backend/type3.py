@@ -345,11 +345,11 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     # Get severity colors
     severity = safe_str(vulnerability_section.get('severity', 'Medium')).strip()
     severity_colors = {
-        'Critical': {'bg': '990033', 'text': 'FFFFFF'},
+        'Critical': {'bg': '7030A0', 'text': 'FFFFFF'},
         'High': {'bg': 'FF0000', 'text': 'FFFFFF'},
-        'Medium': {'bg': 'FF9900', 'text': '000000'},
+        'Medium': {'bg': 'FFC000', 'text': '000000'},
         'Low': {'bg': 'FFFF00', 'text': '000000'},
-        'Informational': {'bg': '00B050', 'text': 'FFFFFF'}
+        'Informational': {'bg': '92D050', 'text': 'FFFFFF'}
     }
     colors = severity_colors.get(severity, severity_colors['Medium'])
 
@@ -583,7 +583,7 @@ def create_asset_findings_table(doc, vulnerability_data):
     from docx.oxml.ns import nsdecls
     
     if not vulnerability_data:
-        return
+        return None
     
     # Aggregate data by asset
     asset_data = {}
@@ -651,12 +651,12 @@ def create_asset_findings_table(doc, vulnerability_data):
     headers = ['Sr.\nNo.', 'Asset/Hostname', 'Instant\npurpose', 'VAPT\nStatus', 'Critical', 'High', 'Medium', 'Low', 'Informational', 'Total']
     
     severity_colors = {
-        4: '990033',  # Critical - Dark Red/Maroon
+        4: '7030A0',  # Critical - Purple/Maroon
         5: 'FF0000',  # High - Red
-        6: 'FF9900',  # Medium - Orange
+        6: 'FFC000',  # Medium - Orange
         7: 'FFFF00',  # Low - Yellow
-        8: '00B050',  # Informational - Green
-        9: '0070C0'   # Total - Blue
+        8: '92D050',  # Informational - Green
+        9: '00B0F0'   # Total - Blue
     }
     
     for idx, header_text in enumerate(headers):
@@ -696,12 +696,12 @@ def create_asset_findings_table(doc, vulnerability_data):
         
         # Severity counts with colored backgrounds
         severity_vals = [
-            (4, counts['critical'], '990033'),
+            (4, counts['critical'], '7030A0'),
             (5, counts['high'], 'FF0000'),
-            (6, counts['medium'], 'FF9900'),
+            (6, counts['medium'], 'FFC000'),
             (7, counts['low'], 'FFFF00'),
-            (8, counts['informational'], '00B050'),
-            (9, counts['total'], '0070C0')
+            (8, counts['informational'], '92D050'),
+            (9, counts['total'], '00B0F0')
         ]
         
         for col_idx, val, color in severity_vals:
@@ -728,12 +728,12 @@ def create_asset_findings_table(doc, vulnerability_data):
     
     # Overall severity counts
     overall_vals = [
-        (4, overall['critical'], '990033'),
+        (4, overall['critical'], '7030A0'),
         (5, overall['high'], 'FF0000'),
-        (6, overall['medium'], 'FF9900'),
+        (6, overall['medium'], 'FFC000'),
         (7, overall['low'], 'FFFF00'),
-        (8, overall['informational'], '00B050'),
-        (9, overall['total'], '0070C0')
+        (8, overall['informational'], '92D050'),
+        (9, overall['total'], '00B0F0')
     ]
     
     for col_idx, val, color in overall_vals:
@@ -824,8 +824,34 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         doc = Document(tmp_path)
         
         if vulnerability_sections:
-            # Add Asset Findings Table (appears after Risk Level & Description from template)
-            create_asset_findings_table(doc, vulnerability_data)
+            # Find the "Risk Level Description" paragraph and insert table after it
+            risk_level_idx = None
+            for i, para in enumerate(doc.paragraphs):
+                if 'Risk Level Description' in para.text:
+                    risk_level_idx = i
+                    break
+            
+            if risk_level_idx is not None:
+                # Find the next page/section after Risk Level Description content
+                # Look for "Total Vulnerabilities" or similar to find where graph starts
+                graph_idx = None
+                for i, para in enumerate(doc.paragraphs):
+                    if 'Total Vulnerabilities' in para.text:
+                        graph_idx = i
+                        break
+                
+                if graph_idx is not None:
+                    # Insert table element before the graph paragraph
+                    table = create_asset_findings_table(doc, vulnerability_data)
+                    if table is not None:
+                        # Move table to before the graph
+                        graph_para = doc.paragraphs[graph_idx]._element
+                        table._element.getparent().remove(table._element)
+                        graph_para.addprevious(table._element)
+                else:
+                    create_asset_findings_table(doc, vulnerability_data)
+            else:
+                create_asset_findings_table(doc, vulnerability_data)
             
             # Detailed Observations heading on new page
             doc.add_page_break()
