@@ -345,11 +345,11 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     # Get severity colors
     severity = safe_str(vulnerability_section.get('severity', 'Medium')).strip()
     severity_colors = {
-        'Critical': {'bg': '990000', 'text': 'FFFFFF'},
-        'High': {'bg': 'FF6600', 'text': 'FFFFFF'},
-        'Medium': {'bg': 'FFCC00', 'text': '000000'},
-        'Low': {'bg': '00CC00', 'text': 'FFFFFF'},
-        'Informational': {'bg': '3399FF', 'text': 'FFFFFF'}
+        'Critical': {'bg': '990033', 'text': 'FFFFFF'},
+        'High': {'bg': 'FF0000', 'text': 'FFFFFF'},
+        'Medium': {'bg': 'FF9900', 'text': '000000'},
+        'Low': {'bg': 'FFFF00', 'text': '000000'},
+        'Informational': {'bg': '00B050', 'text': 'FFFFFF'}
     }
     colors = severity_colors.get(severity, severity_colors['Medium'])
 
@@ -557,7 +557,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
             run = step_p.add_run(step_text)
             run.font.name = 'Altone Trial'
             run.font.size = Pt(10)
-            run.font.bold = True
+            run.font.bold = False
 
             # Add the image if present
             img_path = poc_img.get('path') or poc_img.get('filename')
@@ -627,10 +627,7 @@ def create_asset_findings_table(doc, vulnerability_data):
         overall['informational'] += counts['informational']
     overall['total'] = overall['critical'] + overall['high'] + overall['medium'] + overall['low'] + overall['informational']
     
-    # Add page break and heading
-    doc.add_page_break()
-    
-    # Create table with header row + data rows + overall row
+    # Create table with header row + data rows + overall row (no page break - handled by caller)
     num_rows = 1 + len(asset_data) + 1  # header + assets + overall
     table = doc.add_table(rows=num_rows, cols=9)
     table.style = 'Table Grid'
@@ -654,12 +651,12 @@ def create_asset_findings_table(doc, vulnerability_data):
     headers = ['Sr.\nNo.', 'Asset/Hostname', 'Instant\npurpose', 'VAPT\nStatus', 'Critical', 'High', 'Medium', 'Low', 'Informational', 'Total']
     
     severity_colors = {
-        4: 'FF0000',  # Critical - Red
-        5: 'FF6600',  # High - Orange
-        6: 'FFCC00',  # Medium - Yellow
-        7: '00CC00',  # Low - Green
-        8: '3399FF',  # Informational - Blue
-        9: '6923D0'   # Total - Purple
+        4: '990033',  # Critical - Dark Red/Maroon
+        5: 'FF0000',  # High - Red
+        6: 'FF9900',  # Medium - Orange
+        7: 'FFFF00',  # Low - Yellow
+        8: '00B050',  # Informational - Green
+        9: '0070C0'   # Total - Blue
     }
     
     for idx, header_text in enumerate(headers):
@@ -699,12 +696,12 @@ def create_asset_findings_table(doc, vulnerability_data):
         
         # Severity counts with colored backgrounds
         severity_vals = [
-            (4, counts['critical'], 'FF0000'),
-            (5, counts['high'], 'FF6600'),
-            (6, counts['medium'], 'FFCC00'),
-            (7, counts['low'], '00CC00'),
-            (8, counts['informational'], '3399FF'),
-            (9, counts['total'], '6923D0')
+            (4, counts['critical'], '990033'),
+            (5, counts['high'], 'FF0000'),
+            (6, counts['medium'], 'FF9900'),
+            (7, counts['low'], 'FFFF00'),
+            (8, counts['informational'], '00B050'),
+            (9, counts['total'], '0070C0')
         ]
         
         for col_idx, val, color in severity_vals:
@@ -731,12 +728,12 @@ def create_asset_findings_table(doc, vulnerability_data):
     
     # Overall severity counts
     overall_vals = [
-        (4, overall['critical'], 'FF0000'),
-        (5, overall['high'], 'FF6600'),
-        (6, overall['medium'], 'FFCC00'),
-        (7, overall['low'], '00CC00'),
-        (8, overall['informational'], '3399FF'),
-        (9, overall['total'], '6923D0')
+        (4, overall['critical'], '990033'),
+        (5, overall['high'], 'FF0000'),
+        (6, overall['medium'], 'FF9900'),
+        (7, overall['low'], 'FFFF00'),
+        (8, overall['informational'], '00B050'),
+        (9, overall['total'], '0070C0')
     ]
     
     for col_idx, val, color in overall_vals:
@@ -827,11 +824,11 @@ def generate_certin_report_from_form(data, template_path, output_path, vulnerabi
         doc = Document(tmp_path)
         
         if vulnerability_sections:
-            # Add Asset Findings Table before Detailed Observations
+            # Add Asset Findings Table (appears after Risk Level & Description from template)
             create_asset_findings_table(doc, vulnerability_data)
             
+            # Detailed Observations heading on new page
             doc.add_page_break()
-            
             vuln_heading = doc.add_paragraph()
             vuln_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
             vuln_run = vuln_heading.add_run("Detailed Observations")
