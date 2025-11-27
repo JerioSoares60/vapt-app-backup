@@ -345,7 +345,7 @@ def create_landscape_vulnerability_box(doc, vulnerability_section):
     # Get severity colors
     severity = safe_str(vulnerability_section.get('severity', 'Medium')).strip()
     severity_colors = {
-        'Critical': {'bg': '7030A0', 'text': 'FFFFFF'},
+        'Critical': {'bg': '800000', 'text': 'FFFFFF'},
         'High': {'bg': 'FF0000', 'text': 'FFFFFF'},
         'Medium': {'bg': 'FFC000', 'text': '000000'},
         'Low': {'bg': 'FFFF00', 'text': '000000'},
@@ -651,7 +651,7 @@ def create_asset_findings_table(doc, vulnerability_data):
     headers = ['Sr.\nNo.', 'Asset/Hostname', 'Instant\npurpose', 'VAPT\nStatus', 'Critical', 'High', 'Medium', 'Low', 'Informational', 'Total']
     
     severity_colors = {
-        4: '7030A0',  # Critical - Purple/Maroon
+        4: '800000',  # Critical - Dark Red/Maroon
         5: 'FF0000',  # High - Red
         6: 'FFC000',  # Medium - Orange
         7: 'FFFF00',  # Low - Yellow
@@ -696,7 +696,7 @@ def create_asset_findings_table(doc, vulnerability_data):
         
         # Severity counts with colored backgrounds
         severity_vals = [
-            (4, counts['critical'], '7030A0'),
+            (4, counts['critical'], '800000'),
             (5, counts['high'], 'FF0000'),
             (6, counts['medium'], 'FFC000'),
             (7, counts['low'], 'FFFF00'),
@@ -728,7 +728,7 @@ def create_asset_findings_table(doc, vulnerability_data):
     
     # Overall severity counts
     overall_vals = [
-        (4, overall['critical'], '7030A0'),
+        (4, overall['critical'], '800000'),
         (5, overall['high'], 'FF0000'),
         (6, overall['medium'], 'FFC000'),
         (7, overall['low'], 'FFFF00'),
