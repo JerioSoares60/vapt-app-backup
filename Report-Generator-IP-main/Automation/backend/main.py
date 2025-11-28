@@ -3127,6 +3127,12 @@ async def mitkat_form():
             .result { display: none; margin: 20px 0; padding: 15px; border-radius: 4px; }
             .result.success { background-color: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
             .result.error { background-color: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+            .dynamic-item { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
+            .dynamic-item input, .dynamic-item select { flex: 1; min-width: 150px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+            .btn-danger { background-color: #dc3545; }
+            .btn-danger:hover { background-color: #c82333; }
+            .btn-secondary { background-color: #6c757d; }
+            .btn-secondary:hover { background-color: #5a6268; }
         </style>
     </head>
     <body>
@@ -3227,6 +3233,93 @@ async def mitkat_form():
                     </div>
                 </div>
 
+                <!-- Document Change History -->
+                <div class="form-section">
+                    <h3>📝 Document Change History</h3>
+                    <div id="changeHistoryList">
+                        <div class="dynamic-item">
+                            <input type="text" name="change_version[]" placeholder="Version" required>
+                            <input type="date" name="change_date[]" required>
+                            <input type="text" name="change_remarks[]" placeholder="Remarks/Reason of change" required>
+                            <button type="button" class="btn btn-danger" onclick="removeChangeHistory(this)">Remove</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="addChangeHistory()">+ Add Change History</button>
+                </div>
+
+                <!-- Document Distribution List -->
+                <div class="form-section">
+                    <h3>📧 Document Distribution List</h3>
+                    <div id="distributionList">
+                        <div class="dynamic-item">
+                            <input type="text" name="dist_name[]" placeholder="Name" required>
+                            <input type="text" name="dist_organization[]" placeholder="Organization" required>
+                            <input type="text" name="dist_designation[]" placeholder="Designation" required>
+                            <input type="email" name="dist_email[]" placeholder="Email ID" required>
+                            <button type="button" class="btn btn-danger" onclick="removeDistribution(this)">Remove</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="addDistribution()">+ Add Distribution</button>
+                </div>
+
+                <!-- Engagement Scope -->
+                <div class="form-section">
+                    <h3>🎯 Engagement Scope</h3>
+                    <div id="engagementScopeList">
+                        <div class="dynamic-item">
+                            <input type="number" name="scope_sr_no[]" placeholder="S. No">
+                            <input type="text" name="scope_asset[]" placeholder="Asset Description">
+                            <input type="text" name="scope_criticality[]" placeholder="Criticality">
+                            <input type="text" name="scope_url[]" placeholder="URL or NA">
+                            <input type="text" name="scope_location[]" placeholder="Location">
+                            <input type="text" name="scope_hash[]" placeholder="Hash Value">
+                            <input type="text" name="scope_version[]" placeholder="Version">
+                            <input type="text" name="scope_other[]" placeholder="Other Details">
+                            <button type="button" class="btn btn-danger" onclick="removeEngagementScope(this)">Remove</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="addEngagementScope()">+ Add Asset</button>
+                </div>
+
+                <!-- Details of Auditing Team -->
+                <div class="form-section">
+                    <h3>👥 Details of Auditing Team</h3>
+                    <div id="auditingTeamList">
+                        <div class="dynamic-item">
+                            <input type="text" name="team_name[]" placeholder="Name" required>
+                            <input type="text" name="team_designation[]" placeholder="Designation" required>
+                            <input type="email" name="team_email[]" placeholder="Email ID" required>
+                            <input type="text" name="team_qualifications[]" placeholder="Qualifications/Certifications" required>
+                            <select name="team_certin_listed[]" required>
+                                <option value="">CERT-In Listed?</option>
+                                <option value="Yes">Yes</option>
+                                <option value="No">No</option>
+                            </select>
+                            <button type="button" class="btn btn-danger" onclick="removeAuditingTeam(this)">Remove</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="addAuditingTeam()">+ Add Team Member</button>
+                </div>
+
+                <!-- Tools/Software Used -->
+                <div class="form-section">
+                    <h3>🛠️ Tools/Software Used</h3>
+                    <div id="toolsSoftwareList">
+                        <div class="dynamic-item">
+                            <input type="number" name="tool_sr_no[]" placeholder="S. No" required>
+                            <input type="text" name="tool_name[]" placeholder="Name of Tool/Software" required>
+                            <input type="text" name="tool_version[]" placeholder="Version" required>
+                            <select name="tool_type[]" required>
+                                <option value="">Type</option>
+                                <option value="Opensource">Opensource</option>
+                                <option value="Licensed">Licensed</option>
+                            </select>
+                            <button type="button" class="btn btn-danger" onclick="removeToolSoftware(this)">Remove</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="addToolSoftware()">+ Add Tool</button>
+                </div>
+
                 <!-- Vulnerability Data -->
                 <div class="form-section">
                     <h3>🔍 Vulnerability Data</h3>
@@ -3284,6 +3377,109 @@ async def mitkat_form():
         </div>
 
         <script>
+            // Functions to add/remove dynamic items
+            function addChangeHistory() {
+                const container = document.getElementById('changeHistoryList');
+                const div = document.createElement('div');
+                div.className = 'dynamic-item';
+                div.innerHTML = `
+                    <input type="text" name="change_version[]" placeholder="Version" required>
+                    <input type="date" name="change_date[]" required>
+                    <input type="text" name="change_remarks[]" placeholder="Remarks/Reason of change" required>
+                    <button type="button" class="btn btn-danger" onclick="removeChangeHistory(this)">Remove</button>
+                `;
+                container.appendChild(div);
+            }
+
+            function removeChangeHistory(button) {
+                button.parentElement.remove();
+            }
+
+            function addDistribution() {
+                const container = document.getElementById('distributionList');
+                const div = document.createElement('div');
+                div.className = 'dynamic-item';
+                div.innerHTML = `
+                    <input type="text" name="dist_name[]" placeholder="Name" required>
+                    <input type="text" name="dist_organization[]" placeholder="Organization" required>
+                    <input type="text" name="dist_designation[]" placeholder="Designation" required>
+                    <input type="email" name="dist_email[]" placeholder="Email ID" required>
+                    <button type="button" class="btn btn-danger" onclick="removeDistribution(this)">Remove</button>
+                `;
+                container.appendChild(div);
+            }
+
+            function removeDistribution(button) {
+                button.parentElement.remove();
+            }
+
+            function addEngagementScope() {
+                const container = document.getElementById('engagementScopeList');
+                const div = document.createElement('div');
+                div.className = 'dynamic-item';
+                div.innerHTML = `
+                    <input type="number" name="scope_sr_no[]" placeholder="S. No">
+                    <input type="text" name="scope_asset[]" placeholder="Asset Description">
+                    <input type="text" name="scope_criticality[]" placeholder="Criticality">
+                    <input type="text" name="scope_url[]" placeholder="URL or NA">
+                    <input type="text" name="scope_location[]" placeholder="Location">
+                    <input type="text" name="scope_hash[]" placeholder="Hash Value">
+                    <input type="text" name="scope_version[]" placeholder="Version">
+                    <input type="text" name="scope_other[]" placeholder="Other Details">
+                    <button type="button" class="btn btn-danger" onclick="removeEngagementScope(this)">Remove</button>
+                `;
+                container.appendChild(div);
+            }
+
+            function removeEngagementScope(button) {
+                button.parentElement.remove();
+            }
+
+            function addAuditingTeam() {
+                const container = document.getElementById('auditingTeamList');
+                const div = document.createElement('div');
+                div.className = 'dynamic-item';
+                div.innerHTML = `
+                    <input type="text" name="team_name[]" placeholder="Name" required>
+                    <input type="text" name="team_designation[]" placeholder="Designation" required>
+                    <input type="email" name="team_email[]" placeholder="Email ID" required>
+                    <input type="text" name="team_qualifications[]" placeholder="Qualifications/Certifications" required>
+                    <select name="team_certin_listed[]" required>
+                        <option value="">CERT-In Listed?</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                    </select>
+                    <button type="button" class="btn btn-danger" onclick="removeAuditingTeam(this)">Remove</button>
+                `;
+                container.appendChild(div);
+            }
+
+            function removeAuditingTeam(button) {
+                button.parentElement.remove();
+            }
+
+            function addToolSoftware() {
+                const container = document.getElementById('toolsSoftwareList');
+                const div = document.createElement('div');
+                div.className = 'dynamic-item';
+                div.innerHTML = `
+                    <input type="number" name="tool_sr_no[]" placeholder="S. No" required>
+                    <input type="text" name="tool_name[]" placeholder="Name of Tool/Software" required>
+                    <input type="text" name="tool_version[]" placeholder="Version" required>
+                    <select name="tool_type[]" required>
+                        <option value="">Type</option>
+                        <option value="Opensource">Opensource</option>
+                        <option value="Licensed">Licensed</option>
+                    </select>
+                    <button type="button" class="btn btn-danger" onclick="removeToolSoftware(this)">Remove</button>
+                `;
+                container.appendChild(div);
+            }
+
+            function removeToolSoftware(button) {
+                button.parentElement.remove();
+            }
+
             document.getElementById('mitkatForm').addEventListener('submit', async function(e) {
                 e.preventDefault();
                 
@@ -3296,6 +3492,90 @@ async def mitkat_form():
                     report_to: document.getElementById('report_to').value
                 };
                 formData.append('front_page_data', JSON.stringify(frontPageData));
+                
+                // Collect Document Change History
+                const changeVersions = document.querySelectorAll('input[name="change_version[]"]');
+                const changeDates = document.querySelectorAll('input[name="change_date[]"]');
+                const changeRemarks = document.querySelectorAll('input[name="change_remarks[]"]');
+                const changeHistory = [];
+                for (let i = 0; i < changeVersions.length; i++) {
+                    changeHistory.push({
+                        version: changeVersions[i].value,
+                        date: changeDates[i].value,
+                        remarks: changeRemarks[i].value
+                    });
+                }
+                
+                // Collect Distribution List
+                const distNames = document.querySelectorAll('input[name="dist_name[]"]');
+                const distOrgs = document.querySelectorAll('input[name="dist_organization[]"]');
+                const distDesignations = document.querySelectorAll('input[name="dist_designation[]"]');
+                const distEmails = document.querySelectorAll('input[name="dist_email[]"]');
+                const distributionList = [];
+                for (let i = 0; i < distNames.length; i++) {
+                    distributionList.push({
+                        name: distNames[i].value,
+                        organization: distOrgs[i].value,
+                        designation: distDesignations[i].value,
+                        email: distEmails[i].value
+                    });
+                }
+                
+                // Collect Engagement Scope
+                const scopeSrNos = document.querySelectorAll('input[name="scope_sr_no[]"]');
+                const scopeAssets = document.querySelectorAll('input[name="scope_asset[]"]');
+                const scopeCriticalities = document.querySelectorAll('input[name="scope_criticality[]"]');
+                const scopeURLs = document.querySelectorAll('input[name="scope_url[]"]');
+                const scopeLocations = document.querySelectorAll('input[name="scope_location[]"]');
+                const scopeHashes = document.querySelectorAll('input[name="scope_hash[]"]');
+                const scopeVersions = document.querySelectorAll('input[name="scope_version[]"]');
+                const scopeOthers = document.querySelectorAll('input[name="scope_other[]"]');
+                const engagementScope = [];
+                for (let i = 0; i < scopeSrNos.length; i++) {
+                    engagementScope.push({
+                        sr_no: parseInt(scopeSrNos[i].value) || (i + 1),
+                        asset_description: scopeAssets[i].value,
+                        criticality: scopeCriticalities[i].value,
+                        url: (scopeURLs[i].value && scopeURLs[i].value.toUpperCase() !== 'NA') ? scopeURLs[i].value : '',
+                        location: scopeLocations[i].value,
+                        hash_value: scopeHashes[i].value,
+                        version: scopeVersions[i].value,
+                        other_details: scopeOthers[i].value
+                    });
+                }
+                
+                // Collect Auditing Team
+                const teamNames = document.querySelectorAll('input[name="team_name[]"]');
+                const teamDesignations = document.querySelectorAll('input[name="team_designation[]"]');
+                const teamEmails = document.querySelectorAll('input[name="team_email[]"]');
+                const teamQualifications = document.querySelectorAll('input[name="team_qualifications[]"]');
+                const teamCertinListed = document.querySelectorAll('select[name="team_certin_listed[]"]');
+                const auditingTeam = [];
+                for (let i = 0; i < teamNames.length; i++) {
+                    auditingTeam.push({
+                        sr_no: i + 1,
+                        name: teamNames[i].value,
+                        designation: teamDesignations[i].value,
+                        email: teamEmails[i].value,
+                        qualifications: teamQualifications[i].value,
+                        certin_listed: teamCertinListed[i].value
+                    });
+                }
+                
+                // Collect Tools/Software
+                const toolSrNos = document.querySelectorAll('input[name="tool_sr_no[]"]');
+                const toolNames = document.querySelectorAll('input[name="tool_name[]"]');
+                const toolVersions = document.querySelectorAll('input[name="tool_version[]"]');
+                const toolTypes = document.querySelectorAll('select[name="tool_type[]"]');
+                const toolsSoftware = [];
+                for (let i = 0; i < toolSrNos.length; i++) {
+                    toolsSoftware.push({
+                        sr_no: parseInt(toolSrNos[i].value) || (i + 1),
+                        name: toolNames[i].value,
+                        version: toolVersions[i].value,
+                        type: toolTypes[i].value
+                    });
+                }
                 
                 // Document control data
                 const docControlData = {
@@ -3312,11 +3592,11 @@ async def mitkat_form():
                     released_by: document.getElementById('released_by').value,
                     release_date: document.getElementById('release_date').value,
                     introduction: document.getElementById('introduction').value,
-                    document_change_history: [],
-                    distribution_list: [],
-                    engagement_scope: [],
-                    auditing_team: [],
-                    tools_software: []
+                    document_change_history: changeHistory,
+                    distribution_list: distributionList,
+                    engagement_scope: engagementScope,
+                    auditing_team: auditingTeam,
+                    tools_software: toolsSoftware
                 };
                 formData.append('doc_control_data', JSON.stringify(docControlData));
                 
