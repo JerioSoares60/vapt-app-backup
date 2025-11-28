@@ -2631,7 +2631,10 @@ def create_mitkat_observations_table(doc, vulnerabilities, poc_image_map):
         
         # Add steps with screenshots
         steps = vuln.get('steps_with_screenshots', [])
-        vuln_key = f"VUL-{int(re.search(r'(\d+)', str(vuln.get('sr_no', idx))).group(1)):03d}" if re.search(r'(\d+)', str(vuln.get('sr_no', idx))) else None
+        # Extract vuln_key - cannot use backslashes in f-string expressions
+        sr_no_str = str(vuln.get('sr_no', idx))
+        match = re.search(r'(\d+)', sr_no_str)
+        vuln_key = f"VUL-{int(match.group(1)):03d}" if match else None
         
         for step_idx, step in enumerate(steps, 1):
             step_p = poc_cell.add_paragraph()
