@@ -87,6 +87,9 @@ async def root():
 from fastapi import APIRouter
 router = APIRouter()
 
+# Create a separate router for MitKat routes
+mitkat_router = APIRouter()
+
 def is_dashboard_allowed(request: Request) -> bool:
     user = request.session.get('user')
     if not user:
@@ -522,6 +525,7 @@ async def get_project_history_events(request: Request, db: Session = Depends(get
     return out
 
 app.include_router(router)
+app.include_router(mitkat_router)
 
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
@@ -2797,7 +2801,7 @@ def insert_mitkat_overall_findings(doc, vulnerabilities):
         run.add_picture(chart_path, width=Inches(6))
         img_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-@app.post("/mitkat/generate-report/")
+@mitkat_router.post("/mitkat/generate-report/")
 async def generate_mitkat_report_endpoint(
     request: Request,
     vulnerability_file: UploadFile = File(...),
@@ -2880,7 +2884,7 @@ async def generate_mitkat_report_endpoint(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/mitkat/", response_class=HTMLResponse)
+@mitkat_router.get("/mitkat/", response_class=HTMLResponse)
 async def mitkat_form():
     """Serve the MitKat report generator form"""
     html_content = """

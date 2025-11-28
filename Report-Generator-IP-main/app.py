@@ -60,6 +60,37 @@ async def health_check():
         db_status = "error"
     return {"status": "ok", "service": "api", "database": db_status}
 
+# Additional health check with more details for debugging
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """Detailed health check for debugging 502 errors"""
+    import socket
+    import platform
+    
+    health_info = {
+        "status": "ok",
+        "service": "api",
+        "platform": platform.system(),
+        "python_version": platform.python_version(),
+        "hostname": socket.gethostname(),
+    }
+    
+    # Database status
+    try:
+        from db import test_connection
+        ok = test_connection()
+        health_info["database"] = "ok" if ok else "error"
+    except Exception as e:
+        health_info["database"] = f"error: {str(e)}"
+    
+    # Check if auth router is loaded
+    try:
+        health_info["auth_router"] = "loaded"
+    except Exception as e:
+        health_info["auth_router"] = f"error: {str(e)}"
+    
+    return health_info
+
 # Root route that redirects to login
 @app.get("/")
 async def root():
@@ -76,6 +107,10 @@ app.mount("/type3", type3_app)
 # Mount the Type-4 (type4.py) app at /type4, protected by SSO
 app.mount("/type4", type4_app)
 app.mount("/dashboard", dashboard_app)
+
+# Include MitKat routes from main.py
+from Automation.backend.main import mitkat_router
+app.include_router(mitkat_router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/Automation", StaticFiles(directory="Automation"), name="automation-static")
