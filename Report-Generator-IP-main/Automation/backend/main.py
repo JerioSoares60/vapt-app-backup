@@ -2343,6 +2343,16 @@ def parse_mitkat_vulnerabilities_excel(file_path):
                             'screenshot': step.get('screenshot', '')
                         })
                 
+                # Extract purpose from Excel if available
+                purpose = ''
+                if df is not None and idx <= len(df):
+                    row = df.iloc[idx - 1]
+                    # Find purpose column (case-insensitive)
+                    for col in df.columns:
+                        if 'purpose' in col.lower():
+                            purpose = str(row.get(col, '')).strip()
+                            break
+                
                 vulnerability = {
                     'sr_no': str(vuln.get('sr_no', idx)),
                     'observation': vuln.get('observation', ''),
@@ -2356,7 +2366,9 @@ def parse_mitkat_vulnerabilities_excel(file_path):
                     'steps_with_screenshots': steps_with_screenshots,
                     'revalidation_status': revalidation_status,
                     'screenshot': screenshot_path,
-                    'new_or_repeat': vuln.get('new_or_re', 'New Observation')
+                    'new_or_repeat': vuln.get('new_or_re', 'New Observation'),
+                    'purpose': purpose or 'Web Application',  # Default to 'Web Application' if not found
+                    'status': 'Completed'  # Default status
                 }
                 vulnerabilities.append(vulnerability)
             
@@ -2392,6 +2404,9 @@ def parse_mitkat_vulnerabilities_excel(file_path):
                 reference = str(row.get(find_col(['Reference', 'References']) or 'Reference', '')).strip()
                 revalidation_status = str(row.get(find_col(['Revalidation Status']) or 'Revalidation Status', '')).strip()
                 screenshot = str(row.get(find_col(['Screenshot']) or 'Screenshot', '')).strip()
+                purpose = str(row.get(find_col(['Purpose', 'purpose']) or 'Purpose', 'Web Application')).strip()
+                if not purpose or purpose.lower() in ['nan', 'none', '']:
+                    purpose = 'Web Application'
                 
                 # Parse steps
                 steps_with_screenshots = []
@@ -2417,7 +2432,9 @@ def parse_mitkat_vulnerabilities_excel(file_path):
                     'steps_with_screenshots': steps_with_screenshots,
                     'revalidation_status': revalidation_status,
                     'screenshot': screenshot,
-                    'new_or_repeat': 'New Observation'
+                    'new_or_repeat': 'New Observation',
+                    'purpose': purpose,
+                    'status': 'Completed'
                 }
                 vulnerabilities.append(vulnerability)
                 
@@ -2728,11 +2745,18 @@ def generate_mitkat_report(vulnerabilities, front_page_data, doc_control_data, t
         
         doc = Document(tmp_path)
         
-        # Insert overall findings table and charts
-        # Find placeholder for observations or insert at end
+        # Insert overall findings table and charts (for earlier pages)
         insert_mitkat_overall_findings(doc, vulnerabilities)
         
-        # Insert detailed observations tables (pages 9, 10, 11, etc.)
+        # Group vulnerabilities by affected_asset (URL/IP)
+        assets_dict = {}
+        for vuln in vulnerabilities:
+            asset = vuln.get('affected_asset', 'Unknown')
+            if asset not in assets_dict:
+                assets_dict[asset] = []
+            assets_dict[asset].append(vuln)
+        
+        # On page 9, after test case table, create tables for each unique asset
         doc.add_page_break()
         observations_heading = doc.add_paragraph("Observations")
         observations_heading.runs[0].font.name = 'Altone Trial'
@@ -2741,6 +2765,30 @@ def generate_mitkat_report(vulnerabilities, front_page_data, doc_control_data, t
         observations_heading.runs[0].font.color.rgb = RGBColor(106, 68, 154)
         observations_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
+        # For each unique asset, create Overall Findings table and Observations table
+        for sr_no, (asset, asset_vulns) in enumerate(assets_dict.items(), 1):
+            # Extract purpose and status from first vulnerability if available
+            purpose = asset_vulns[0].get('purpose', 'Web Application')
+            status = asset_vulns[0].get('status', 'Completed')
+            
+            # Create Overall Findings table (dark blue header)
+            create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_no, purpose, status)
+            
+            # Add spacing
+            doc.add_paragraph()
+            
+            # Create Observations/Vulnerabilities table
+            create_mitkat_observations_vulnerabilities_table(doc, asset_vulns)
+            
+            # Add spacing between assets
+            doc.add_paragraph()
+            
+            # Add page break between assets (except last one)
+            if sr_no < len(assets_dict):
+                doc.add_page_break()
+        
+        # After all asset tables, add detailed vulnerability tables (pages 10, 11, etc.)
+        doc.add_page_break()
         create_mitkat_observations_table(doc, vulnerabilities, poc_image_map)
         
         doc.save(output_path)
@@ -2752,22 +2800,138 @@ def generate_mitkat_report(vulnerabilities, front_page_data, doc_control_data, t
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error generating MitKat report: {str(e)}")
 
-def insert_mitkat_overall_findings(doc, vulnerabilities):
+def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_no, purpose="Web Application", status="Completed"):
     """
-    Insert overall findings table and charts for MitKat report.
+    Create the dark blue "Overall Findings" table for a specific asset.
+    This table shows: Sr. No., Hostname/Address, purpose, Status, and severity counts.
     """
-    # Count vulnerabilities by severity
-    severity_counts = Counter()
-    for vuln in vulnerabilities:
-        severity_counts[vuln.get('severity', 'Medium')] += 1
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
     
-    # Create overall findings table
+    # Count vulnerabilities by severity for this asset
+    severity_counts = {
+        'Critical': 0,
+        'High': 0,
+        'Medium': 0,
+        'Low': 0,
+        'Informational': 0
+    }
+    
+    for vuln in asset_vulns:
+        severity = vuln.get('severity', 'Medium')
+        if severity in severity_counts:
+            severity_counts[severity] += 1
+    
+    total = sum(severity_counts.values())
+    
+    # Create table with 10 columns: Sr. No., Hostname/Address, purpose, Status, Critical, High, Medium, Low, Informational, Total
+    # Two-tiered header: row 0 has first 4 columns, row 1 has severity columns
+    table = doc.add_table(rows=3, cols=10)
+    table.style = 'Table Grid'
+    
+    # First header row: Sr. No., Hostname/Address, purpose, Status (first 4 columns)
+    header_row1 = table.rows[0]
+    header_row1.cells[0].text = 'Sr. No.'
+    header_row1.cells[1].text = 'Hostname/Address'
+    header_row1.cells[2].text = 'purpose'
+    header_row1.cells[3].text = 'Status'
+    # Leave cells 4-9 empty in row 1 (they'll be filled in row 2)
+    for i in range(4, 10):
+        header_row1.cells[i].text = ''
+    
+    # Second header row: Critical, High, Medium, Low, Informational, Total (columns 4-9)
+    header_row2 = table.rows[1]
+    # Leave first 4 columns empty in row 2
+    for i in range(4):
+        header_row2.cells[i].text = ''
+    header_row2.cells[4].text = 'Critical'
+    header_row2.cells[5].text = 'High'
+    header_row2.cells[6].text = 'Medium'
+    header_row2.cells[7].text = 'Low'
+    header_row2.cells[8].text = 'Informational'
+    header_row2.cells[9].text = 'Total'
+    
+    # Dark blue background for header rows
+    dark_blue = '1F4E78'  # Dark blue color
+    for row_idx in [0, 1]:
+        for cell in table.rows[row_idx].cells:
+            shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{dark_blue}"/>')
+            cell._element.get_or_add_tcPr().append(shading)
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in para.runs:
+                    run.font.bold = True
+                    run.font.name = 'Altone Trial'
+                    run.font.size = Pt(10)
+                    run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+    
+    # Data row
+    data_row = table.rows[2]
+    data_row.cells[0].text = str(sr_no)
+    data_row.cells[1].text = asset
+    data_row.cells[2].text = purpose
+    data_row.cells[3].text = status
+    data_row.cells[4].text = str(severity_counts['Critical'])
+    data_row.cells[5].text = str(severity_counts['High'])
+    data_row.cells[6].text = str(severity_counts['Medium'])
+    data_row.cells[7].text = str(severity_counts['Low'])
+    data_row.cells[8].text = str(severity_counts['Informational'])
+    data_row.cells[9].text = str(total)
+    
+    # Color code severity columns
+    severity_colors = {
+        4: ('Critical', '800000'),  # Dark red
+        5: ('High', 'FF0000'),      # Red
+        6: ('Medium', 'FFC000'),    # Orange
+        7: ('Low', '92D050'),       # Green
+        8: ('Informational', '00B0F0'),  # Light blue
+        9: ('Total', '7030A0')      # Purple
+    }
+    
+    for col_idx, (label, color) in severity_colors.items():
+        cell = data_row.cells[col_idx]
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in cell.paragraphs[0].runs:
+            run.font.bold = True
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(10)
+            run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
+        cell._element.get_or_add_tcPr().append(shading)
+    
+    # Style the first 4 columns
+    for col_idx in range(4):
+        cell = data_row.cells[col_idx]
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in cell.paragraphs[0].runs:
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(10)
+    
+    return table
+
+def create_mitkat_observations_vulnerabilities_table(doc, asset_vulns):
+    """
+    Create the "Observations/Vulnerabilities" table listing all vulnerabilities for an asset.
+    Columns: Sr. No., Affected Asset, Observation/Vulnerability Title, CVE/CWE, Severity, New or Repeat Observation
+    """
+    if not asset_vulns:
+        return None
+    
+    # Create table
     table = doc.add_table(rows=1, cols=6)
     table.style = 'Table Grid'
     
-    headers = ['Sr. No.', 'Affected Asset', 'Observation/Vulnerability Title', 'CWE/CWE', 'Severity', 'New or Repeat Observation']
-    header_row = table.rows[0]
+    # Header row
+    headers = [
+        'Sr. No.',
+        'Affected Asset i.e. IP/URL/Application etc',
+        'Observation/Vulnerability Title',
+        'CVE/CWE',
+        'Severity',
+        'New or Repeat Observation'
+    ]
     
+    header_row = table.rows[0]
     for idx, header_text in enumerate(headers):
         cell = header_row.cells[idx]
         p = cell.paragraphs[0]
@@ -2779,22 +2943,57 @@ def insert_mitkat_overall_findings(doc, vulnerabilities):
             run.font.size = Pt(10)
     
     # Add data rows
-    for idx, vuln in enumerate(vulnerabilities, 1):
+    for idx, vuln in enumerate(asset_vulns, 1):
         row = table.add_row()
         row.cells[0].text = str(vuln.get('sr_no', idx))
         row.cells[1].text = vuln.get('affected_asset', 'N/A')
         row.cells[2].text = vuln.get('observation', 'N/A')
         row.cells[3].text = vuln.get('cve_cwe', 'N/A')
-        row.cells[4].text = vuln.get('severity', 'Medium')
+        
+        # Severity with color coding
+        severity = vuln.get('severity', 'Medium')
+        row.cells[4].text = severity
+        
+        # Color code severity cell
+        severity_colors = {
+            'Critical': '800000',  # Dark red
+            'High': 'FF0000',      # Red
+            'Medium': 'FFC000',    # Orange
+            'Low': '92D050',       # Green
+            'Informational': '00B0F0'  # Light blue
+        }
+        
+        severity_color = severity_colors.get(severity, 'FFFFFF')
+        cell = row.cells[4]
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in cell.paragraphs[0].runs:
+            run.font.bold = True
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(10)
+            run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{severity_color}"/>')
+        cell._element.get_or_add_tcPr().append(shading)
+        
         row.cells[5].text = vuln.get('new_or_repeat', 'New Observation')
         
-        # Center align all cells
+        # Style all cells
         for cell in row.cells:
             for para in cell.paragraphs:
                 para.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 for run in para.runs:
                     run.font.name = 'Altone Trial'
                     run.font.size = Pt(10)
+    
+    return table
+
+def insert_mitkat_overall_findings(doc, vulnerabilities):
+    """
+    Insert overall findings table and charts for MitKat report (legacy function, kept for compatibility).
+    """
+    # Count vulnerabilities by severity
+    severity_counts = Counter()
+    for vuln in vulnerabilities:
+        severity_counts[vuln.get('severity', 'Medium')] += 1
     
     # Add bar chart
     with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as chart_file:
@@ -2844,10 +3043,18 @@ async def generate_mitkat_report_endpoint(
             
             poc_image_map = index_mitkat_poc_images(tmp_zip_dir)
         
-        # Template path
-        template_path = os.path.join(get_script_dir(), "MitKat_Template.docx")
+        # Template path - use the provided base template path
+        base_template_path = r"C:\Users\jerio\Downloads\vapt-app-backup\Report-Generator-IP-main\Automation\Mitkat_Base_template.docx"
+        if os.path.exists(base_template_path):
+            template_path = base_template_path
+        else:
+            # Fallback to relative path
+            template_path = os.path.join(get_script_dir(), "Mitkat_Base_template.docx")
+            if not os.path.exists(template_path):
+                template_path = os.path.join(get_script_dir(), "MitKat_Template.docx")
+        
         if not os.path.exists(template_path):
-            raise HTTPException(status_code=404, detail="MitKat template not found. Please ensure MitKat_Template.docx is in the backend directory.")
+            raise HTTPException(status_code=404, detail=f"MitKat template not found at {template_path}. Please ensure Mitkat_Base_template.docx exists.")
         
         # Generate report
         client_name = front_data.get('client_name', 'Client')
