@@ -2765,6 +2765,22 @@ def generate_mitkat_report(vulnerabilities, front_page_data, doc_control_data, t
         observations_heading.runs[0].font.color.rgb = RGBColor(106, 68, 154)
         observations_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
+        # Calculate overall totals across all assets
+        overall_totals = {
+            'Critical': 0,
+            'High': 0,
+            'Medium': 0,
+            'Low': 0,
+            'Informational': 0
+        }
+        for asset_vulns in assets_dict.values():
+            for vuln in asset_vulns:
+                severity = vuln.get('severity', 'Medium')
+                if severity.lower() in ['info', 'informational']:
+                    severity = 'Informational'
+                if severity in overall_totals:
+                    overall_totals[severity] += 1
+        
         # For each unique asset, create Overall Findings table and Observations table
         for sr_no, (asset, asset_vulns) in enumerate(assets_dict.items(), 1):
             # Extract purpose and status from first vulnerability if available
@@ -2772,7 +2788,8 @@ def generate_mitkat_report(vulnerabilities, front_page_data, doc_control_data, t
             status = asset_vulns[0].get('status', 'Completed')
             
             # Create Overall Findings table (dark blue header)
-            create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_no, purpose, status)
+            # Always pass overall_totals for the summary row to show totals across all assets
+            create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_no, purpose, status, overall_totals)
             
             # Add spacing
             doc.add_paragraph()
@@ -2800,10 +2817,11 @@ def generate_mitkat_report(vulnerabilities, front_page_data, doc_control_data, t
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error generating MitKat report: {str(e)}")
 
-def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_no, purpose="Web Application", status="Completed"):
+def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_no, purpose="Web Application", status="Completed", overall_totals=None):
     """
     Create the dark blue "Overall Findings" table for a specific asset.
     This table shows: Sr. No., Hostname/Address, purpose, Status, and severity counts.
+    If overall_totals is provided, the summary row will use those totals instead of asset totals.
     """
     from docx.oxml import parse_xml
     from docx.oxml.ns import nsdecls
@@ -2834,7 +2852,7 @@ def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_n
     
     # Header row: All columns in one row
     header_row = table.rows[0]
-    header_row.cells[0].text = 'Sr. No.'
+    header_row.cells[0].text = 'Sr No.'
     header_row.cells[1].text = 'Hostname/Address'
     header_row.cells[2].text = 'purpose'
     header_row.cells[3].text = 'Status'
@@ -2881,8 +2899,8 @@ def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_n
     
     # Color code severity columns (columns 4-9)
     severity_colors = {
-        4: ('Critical', 'C00000'),      # Dark red
-        5: ('High', 'FF6600'),          # Orange/Red
+        4: ('Critical', '800000'),       # Dark red
+        5: ('High', 'FF0000'),          # Red
         6: ('Medium', 'FFC000'),        # Yellow/Orange
         7: ('Low', '92D050'),           # Green
         8: ('Informational', '00B0F0'), # Light blue
@@ -2918,13 +2936,21 @@ def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_n
         run.font.size = Pt(10)
         run.font.color.rgb = RGBColor(255, 255, 255)  # White text
     
-    # Add severity counts to summary row (same as data row)
-    summary_row.cells[4].text = str(severity_counts['Critical'])
-    summary_row.cells[5].text = str(severity_counts['High'])
-    summary_row.cells[6].text = str(severity_counts['Medium'])
-    summary_row.cells[7].text = str(severity_counts['Low'])
-    summary_row.cells[8].text = str(severity_counts['Informational'])
-    summary_row.cells[9].text = str(total)
+    # Add severity counts to summary row
+    # Use overall_totals if provided, otherwise use asset totals
+    if overall_totals:
+        summary_counts = overall_totals
+        summary_total = sum(overall_totals.values())
+    else:
+        summary_counts = severity_counts
+        summary_total = total
+    
+    summary_row.cells[4].text = str(summary_counts['Critical'])
+    summary_row.cells[5].text = str(summary_counts['High'])
+    summary_row.cells[6].text = str(summary_counts['Medium'])
+    summary_row.cells[7].text = str(summary_counts['Low'])
+    summary_row.cells[8].text = str(summary_counts['Informational'])
+    summary_row.cells[9].text = str(summary_total)
     
     # Color code severity columns in summary row
     for col_idx, (label, color) in severity_colors.items():
@@ -2954,7 +2980,7 @@ def create_mitkat_observations_vulnerabilities_table(doc, asset_vulns):
     
     # Header row
     headers = [
-        'Sr. No.',
+        'Sr No.',
         'Affected Asset i.e. IP/URL/Application etc',
         'Observation/Vulnerability Title',
         'CVE/CWE',
@@ -2992,8 +3018,8 @@ def create_mitkat_observations_vulnerabilities_table(doc, asset_vulns):
         
         # Color code severity cell - match image colors
         severity_colors = {
-            'Critical': 'C00000',      # Dark red
-            'High': 'FF6600',          # Orange/Red
+            'Critical': '800000',      # Dark red
+            'High': 'FF0000',          # Red
             'Medium': 'FFC000',        # Yellow/Orange
             'Low': '92D050',           # Green
             'Informational': '00B0F0', # Light blue
@@ -3431,14 +3457,21 @@ async def mitkat_form():
         <script>
             // Get CSRF token
             let CSRF_TOKEN = null;
+            let CSRF_TOKEN_READY = false;
+            
             (async () => {
                 try {
                     const res = await fetch('/csrf-token', { credentials: 'same-origin' });
                     if (res.ok) {
                         const data = await res.json().catch(() => ({}));
                         CSRF_TOKEN = data.csrf_token || data.token || data.csrf || null;
+                        CSRF_TOKEN_READY = true;
+                        console.log('CSRF token fetched:', CSRF_TOKEN ? 'Yes' : 'No');
                     }
-                } catch (_) {}
+                } catch (err) {
+                    console.error('Error fetching CSRF token:', err);
+                    CSRF_TOKEN_READY = true; // Allow form submission even if token fetch fails
+                }
             })();
 
             // Functions to add/remove dynamic items
@@ -3546,6 +3579,28 @@ async def mitkat_form():
 
             document.getElementById('mitkatForm').addEventListener('submit', async function(e) {
                 e.preventDefault();
+                
+                // Wait for initial CSRF token if not ready yet
+                if (!CSRF_TOKEN_READY) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                
+                // Refresh CSRF token before submission
+                try {
+                    const tokenRes = await fetch('/csrf-token', { credentials: 'same-origin' });
+                    if (tokenRes.ok) {
+                        const tokenData = await tokenRes.json().catch(() => ({}));
+                        CSRF_TOKEN = tokenData.csrf_token || tokenData.token || tokenData.csrf || CSRF_TOKEN;
+                        console.log('CSRF token refreshed before submission:', CSRF_TOKEN ? 'Yes' : 'No');
+                    }
+                } catch (err) {
+                    console.warn('Could not refresh CSRF token:', err);
+                }
+                
+                if (!CSRF_TOKEN) {
+                    alert('CSRF token not available. Please refresh the page and try again.');
+                    return;
+                }
                 
                 const formData = new FormData();
                 
