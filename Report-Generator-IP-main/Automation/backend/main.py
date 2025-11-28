@@ -2819,54 +2819,47 @@ def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_n
     
     for vuln in asset_vulns:
         severity = vuln.get('severity', 'Medium')
+        # Normalize severity names
+        if severity.lower() in ['info', 'informational']:
+            severity = 'Informational'
         if severity in severity_counts:
             severity_counts[severity] += 1
     
     total = sum(severity_counts.values())
     
     # Create table with 10 columns: Sr. No., Hostname/Address, purpose, Status, Critical, High, Medium, Low, Informational, Total
-    # Two-tiered header: row 0 has first 4 columns, row 1 has severity columns
+    # Structure: Header row, Data row, Overall Findings summary row
     table = doc.add_table(rows=3, cols=10)
     table.style = 'Table Grid'
     
-    # First header row: Sr. No., Hostname/Address, purpose, Status (first 4 columns)
-    header_row1 = table.rows[0]
-    header_row1.cells[0].text = 'Sr. No.'
-    header_row1.cells[1].text = 'Hostname/Address'
-    header_row1.cells[2].text = 'purpose'
-    header_row1.cells[3].text = 'Status'
-    # Leave cells 4-9 empty in row 1 (they'll be filled in row 2)
-    for i in range(4, 10):
-        header_row1.cells[i].text = ''
+    # Header row: All columns in one row
+    header_row = table.rows[0]
+    header_row.cells[0].text = 'Sr. No.'
+    header_row.cells[1].text = 'Hostname/Address'
+    header_row.cells[2].text = 'purpose'
+    header_row.cells[3].text = 'Status'
+    header_row.cells[4].text = 'Critical'
+    header_row.cells[5].text = 'High'
+    header_row.cells[6].text = 'Medium'
+    header_row.cells[7].text = 'Low'
+    header_row.cells[8].text = 'Informational'
+    header_row.cells[9].text = 'Total'
     
-    # Second header row: Critical, High, Medium, Low, Informational, Total (columns 4-9)
-    header_row2 = table.rows[1]
-    # Leave first 4 columns empty in row 2
-    for i in range(4):
-        header_row2.cells[i].text = ''
-    header_row2.cells[4].text = 'Critical'
-    header_row2.cells[5].text = 'High'
-    header_row2.cells[6].text = 'Medium'
-    header_row2.cells[7].text = 'Low'
-    header_row2.cells[8].text = 'Informational'
-    header_row2.cells[9].text = 'Total'
-    
-    # Dark blue background for header rows
+    # Dark blue background for header row
     dark_blue = '1F4E78'  # Dark blue color
-    for row_idx in [0, 1]:
-        for cell in table.rows[row_idx].cells:
-            shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{dark_blue}"/>')
-            cell._element.get_or_add_tcPr().append(shading)
-            for para in cell.paragraphs:
-                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                for run in para.runs:
-                    run.font.bold = True
-                    run.font.name = 'Altone Trial'
-                    run.font.size = Pt(10)
-                    run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+    for cell in header_row.cells:
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{dark_blue}"/>')
+        cell._element.get_or_add_tcPr().append(shading)
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in para.runs:
+                run.font.bold = True
+                run.font.name = 'Altone Trial'
+                run.font.size = Pt(10)
+                run.font.color.rgb = RGBColor(255, 255, 255)  # White text
     
     # Data row
-    data_row = table.rows[2]
+    data_row = table.rows[1]
     data_row.cells[0].text = str(sr_no)
     data_row.cells[1].text = asset
     data_row.cells[2].text = purpose
@@ -2878,14 +2871,22 @@ def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_n
     data_row.cells[8].text = str(severity_counts['Informational'])
     data_row.cells[9].text = str(total)
     
-    # Color code severity columns
+    # Style the first 4 columns (no background color)
+    for col_idx in range(4):
+        cell = data_row.cells[col_idx]
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in cell.paragraphs[0].runs:
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(10)
+    
+    # Color code severity columns (columns 4-9)
     severity_colors = {
-        4: ('Critical', '800000'),  # Dark red
-        5: ('High', 'FF0000'),      # Red
-        6: ('Medium', 'FFC000'),    # Orange
-        7: ('Low', '92D050'),       # Green
-        8: ('Informational', '00B0F0'),  # Light blue
-        9: ('Total', '7030A0')      # Purple
+        4: ('Critical', 'C00000'),      # Dark red
+        5: ('High', 'FF6600'),          # Orange/Red
+        6: ('Medium', 'FFC000'),        # Yellow/Orange
+        7: ('Low', '92D050'),           # Green
+        8: ('Informational', '00B0F0'), # Light blue
+        9: ('Total', '7030A0')          # Purple
     }
     
     for col_idx, (label, color) in severity_colors.items():
@@ -2899,13 +2900,43 @@ def create_mitkat_overall_findings_table_per_asset(doc, asset, asset_vulns, sr_n
         shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
         cell._element.get_or_add_tcPr().append(shading)
     
-    # Style the first 4 columns
-    for col_idx in range(4):
-        cell = data_row.cells[col_idx]
+    # Overall Findings summary row (row 2)
+    summary_row = table.rows[2]
+    # Merge first 4 cells for "Overall Findings"
+    summary_row.cells[0].merge(summary_row.cells[1])
+    summary_row.cells[0].merge(summary_row.cells[2])
+    summary_row.cells[0].merge(summary_row.cells[3])
+    summary_row.cells[0].text = 'Overall Findings'
+    
+    # Dark blue background for merged cell
+    shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{dark_blue}"/>')
+    summary_row.cells[0]._element.get_or_add_tcPr().append(shading)
+    summary_row.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in summary_row.cells[0].paragraphs[0].runs:
+        run.font.bold = True
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(10)
+        run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+    
+    # Add severity counts to summary row (same as data row)
+    summary_row.cells[4].text = str(severity_counts['Critical'])
+    summary_row.cells[5].text = str(severity_counts['High'])
+    summary_row.cells[6].text = str(severity_counts['Medium'])
+    summary_row.cells[7].text = str(severity_counts['Low'])
+    summary_row.cells[8].text = str(severity_counts['Informational'])
+    summary_row.cells[9].text = str(total)
+    
+    # Color code severity columns in summary row
+    for col_idx, (label, color) in severity_colors.items():
+        cell = summary_row.cells[col_idx]
         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         for run in cell.paragraphs[0].runs:
+            run.font.bold = True
             run.font.name = 'Altone Trial'
             run.font.size = Pt(10)
+            run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
+        cell._element.get_or_add_tcPr().append(shading)
     
     return table
 
@@ -2932,6 +2963,7 @@ def create_mitkat_observations_vulnerabilities_table(doc, asset_vulns):
     ]
     
     header_row = table.rows[0]
+    dark_blue = '1F4E78'  # Dark blue color
     for idx, header_text in enumerate(headers):
         cell = header_row.cells[idx]
         p = cell.paragraphs[0]
@@ -2941,6 +2973,10 @@ def create_mitkat_observations_vulnerabilities_table(doc, asset_vulns):
             run.font.bold = True
             run.font.name = 'Altone Trial'
             run.font.size = Pt(10)
+            run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+        # Dark blue background for header
+        shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{dark_blue}"/>')
+        cell._element.get_or_add_tcPr().append(shading)
     
     # Add data rows
     for idx, vuln in enumerate(asset_vulns, 1):
@@ -2954,16 +2990,22 @@ def create_mitkat_observations_vulnerabilities_table(doc, asset_vulns):
         severity = vuln.get('severity', 'Medium')
         row.cells[4].text = severity
         
-        # Color code severity cell
+        # Color code severity cell - match image colors
         severity_colors = {
-            'Critical': '800000',  # Dark red
-            'High': 'FF0000',      # Red
-            'Medium': 'FFC000',    # Orange
-            'Low': '92D050',       # Green
-            'Informational': '00B0F0'  # Light blue
+            'Critical': 'C00000',      # Dark red
+            'High': 'FF6600',          # Orange/Red
+            'Medium': 'FFC000',        # Yellow/Orange
+            'Low': '92D050',           # Green
+            'Informational': '00B0F0', # Light blue
+            'Info': '00B0F0'           # Also handle "Info" variant
         }
         
-        severity_color = severity_colors.get(severity, 'FFFFFF')
+        # Normalize severity name
+        severity_normalized = severity
+        if severity.lower() in ['info', 'informational']:
+            severity_normalized = 'Informational'
+        
+        severity_color = severity_colors.get(severity_normalized, severity_colors.get(severity, 'FFFFFF'))
         cell = row.cells[4]
         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         for run in cell.paragraphs[0].runs:
@@ -2988,20 +3030,11 @@ def create_mitkat_observations_vulnerabilities_table(doc, asset_vulns):
 
 def insert_mitkat_overall_findings(doc, vulnerabilities):
     """
-    Insert overall findings table and charts for MitKat report (legacy function, kept for compatibility).
+    Insert overall findings table for MitKat report (legacy function, kept for compatibility).
+    Chart generation removed as per requirements.
     """
-    # Count vulnerabilities by severity
-    severity_counts = Counter()
-    for vuln in vulnerabilities:
-        severity_counts[vuln.get('severity', 'Medium')] += 1
-    
-    # Add bar chart
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as chart_file:
-        chart_path = create_severity_bar_chart(severity_counts, chart_file.name)
-        img_paragraph = doc.add_paragraph()
-        run = img_paragraph.add_run()
-        run.add_picture(chart_path, width=Inches(6))
-        img_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # This function is kept for compatibility but doesn't generate charts anymore
+    pass
 
 @mitkat_router.post("/mitkat/generate-report/")
 async def generate_mitkat_report_endpoint(
