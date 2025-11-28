@@ -2734,7 +2734,7 @@ def generate_mitkat_report(vulnerabilities, front_page_data, doc_control_data, t
             'ENGAGEMENT_SCOPE': doc_control_data.get('engagement_scope', []),
             'AUDITING_TEAM': doc_control_data.get('auditing_team', []),
             'TOOLS_SOFTWARE': doc_control_data.get('tools_software', []),
-            'INTRODUCTION': doc_control_data.get('introduction', ''),
+            'INTRODUCTION': doc_control_data.get('introduction', ''),  # Not required, can be empty
         }
         
         tpl.render(context)
@@ -3227,10 +3227,6 @@ async def mitkat_form():
                             <input type="date" id="release_date" name="release_date" required>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label for="introduction">Introduction *</label>
-                        <textarea id="introduction" name="introduction" required></textarea>
-                    </div>
                 </div>
 
                 <!-- Document Change History -->
@@ -3377,6 +3373,18 @@ async def mitkat_form():
         </div>
 
         <script>
+            // Get CSRF token
+            let CSRF_TOKEN = null;
+            (async () => {
+                try {
+                    const res = await fetch('/csrf-token', { credentials: 'same-origin' });
+                    if (res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        CSRF_TOKEN = data.csrf_token || data.token || data.csrf || null;
+                    }
+                } catch (_) {}
+            })();
+
             // Functions to add/remove dynamic items
             function addChangeHistory() {
                 const container = document.getElementById('changeHistoryList');
@@ -3591,7 +3599,7 @@ async def mitkat_form():
                     approved_by: document.getElementById('approved_by').value,
                     released_by: document.getElementById('released_by').value,
                     release_date: document.getElementById('release_date').value,
-                    introduction: document.getElementById('introduction').value,
+                    introduction: '',  // Not required
                     document_change_history: changeHistory,
                     distribution_list: distributionList,
                     engagement_scope: engagementScope,
@@ -3606,13 +3614,25 @@ async def mitkat_form():
                     formData.append('poc_zip', document.getElementById('poc_zip').files[0]);
                 }
                 
+                // Add CSRF token to form data as well (backup)
+                if (CSRF_TOKEN) {
+                    formData.append('csrf_token', CSRF_TOKEN);
+                }
+                
                 try {
                     document.getElementById('progress').style.display = 'block';
                     document.getElementById('progressText').textContent = 'Generating report...';
                     document.getElementById('progressBar').style.width = '50%';
                     
+                    // Add CSRF token to headers
+                    const headers = {};
+                    if (CSRF_TOKEN) {
+                        headers['X-CSRF-Token'] = CSRF_TOKEN;
+                    }
+                    
                     const response = await fetch('/mitkat/generate-report/', {
                         method: 'POST',
+                        headers: headers,
                         body: formData,
                         credentials: 'same-origin'
                     });
