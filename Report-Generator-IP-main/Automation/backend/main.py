@@ -3043,18 +3043,41 @@ async def generate_mitkat_report_endpoint(
             
             poc_image_map = index_mitkat_poc_images(tmp_zip_dir)
         
-        # Template path - use the provided base template path
-        base_template_path = r"C:\Users\jerio\Downloads\vapt-app-backup\Report-Generator-IP-main\Automation\Mitkat_Base_template.docx"
-        if os.path.exists(base_template_path):
-            template_path = base_template_path
-        else:
-            # Fallback to relative path
-            template_path = os.path.join(get_script_dir(), "Mitkat_Base_template.docx")
-            if not os.path.exists(template_path):
-                template_path = os.path.join(get_script_dir(), "MitKat_Template.docx")
+        # Template path - check multiple locations
+        script_dir = get_script_dir()  # Automation/backend/
+        automation_dir = os.path.dirname(script_dir)  # Automation/
+        project_root = os.path.dirname(automation_dir)  # Report-Generator-IP-main/
         
-        if not os.path.exists(template_path):
-            raise HTTPException(status_code=404, detail=f"MitKat template not found at {template_path}. Please ensure Mitkat_Base_template.docx exists.")
+        # Try multiple possible locations
+        possible_paths = [
+            # 1. In backend directory (where main.py is) - PRIMARY LOCATION
+            os.path.join(script_dir, "Mitkat_Base_template.docx"),
+            # 2. In Automation directory (parent of backend)
+            os.path.join(automation_dir, "Mitkat_Base_template.docx"),
+            # 3. In project root
+            os.path.join(project_root, "Automation", "backend", "Mitkat_Base_template.docx"),
+            os.path.join(project_root, "Automation", "Mitkat_Base_template.docx"),
+            # 4. Windows local development paths
+            r"C:\Users\jerio\Downloads\vapt-app-backup\Report-Generator-IP-main\Automation\backend\Mitkat_Base_template.docx",
+            r"C:\Users\jerio\Downloads\vapt-app-backup\Report-Generator-IP-main\Automation\Mitkat_Base_template.docx",
+            # 5. Fallback to old name (for backward compatibility)
+            os.path.join(script_dir, "MitKat_Template.docx"),
+            os.path.join(automation_dir, "MitKat_Template.docx"),
+        ]
+        
+        template_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                template_path = path
+                print(f"✅ Found MitKat template at: {template_path}")
+                break
+        
+        if not template_path:
+            error_msg = f"MitKat template not found. Checked locations:\n"
+            for path in possible_paths:
+                error_msg += f"  - {path}\n"
+            error_msg += "\nPlease ensure Mitkat_Base_template.docx exists in one of these locations."
+            raise HTTPException(status_code=404, detail=error_msg)
         
         # Generate report
         client_name = front_data.get('client_name', 'Client')
