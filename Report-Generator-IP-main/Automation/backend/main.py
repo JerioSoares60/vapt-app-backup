@@ -21,6 +21,7 @@ import numpy as np
 from collections import Counter
 import urllib.parse
 from zipfile import ZipFile
+import zipfile
 import glob
 import hashlib
 import re
@@ -2288,3 +2289,878 @@ async def get_usage_analytics(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         print(f"Error fetching usage analytics: {e}")
         return []
+
+# ============================================================================
+# MITKAT REPORT GENERATOR (New Report Type)
+# ============================================================================
+
+def parse_mitkat_vulnerabilities_excel(file_path):
+    """
+    Parse Excel file for MitKat report with support for Revalidation Status and Screenshot columns.
+    Expected columns:
+    - Sr No, Observation/Vulnerability title, Affected Asset, CVE/CWE, Severity, 
+    - Detailed observation, Recommendation, Reference, Steps, Screenshot columns,
+    - Revalidation Status, Screenshot (new columns)
+    """
+    print(f"Parsing MitKat vulnerability data from: {file_path}")
+    vulnerabilities = []
+    
+    try:
+        # Try standardized parser first
+        try:
+            parsed_data = parse_excel_data(file_path)
+            print(f"✅ Using standardized Excel parser for MitKat")
+            
+            for idx, vuln in enumerate(parsed_data['vulnerabilities'], 1):
+                # Extract revalidation status and screenshot from raw data
+                df = parsed_data.get('raw_df')
+                revalidation_status = ''
+                screenshot_path = ''
+                
+                if df is not None and idx <= len(df):
+                    row = df.iloc[idx - 1]
+                    # Find revalidation status column (case-insensitive)
+                    for col in df.columns:
+                        if 'revalidation' in col.lower() and 'status' in col.lower():
+                            revalidation_status = str(row.get(col, '')).strip()
+                            break
+                    # Find screenshot column (case-insensitive, but not the step screenshots)
+                    for col in df.columns:
+                        if col.lower() == 'screenshot' and 'step' not in col.lower():
+                            screenshot_path = str(row.get(col, '')).strip()
+                            break
+                
+                # Convert steps to steps_with_screenshots format
+                steps_with_screenshots = []
+                if vuln.get('steps'):
+                    for step in vuln['steps']:
+                        steps_with_screenshots.append({
+                            'text': step['content'],
+                            'screenshot': step.get('screenshot', '')
+                        })
+                
+                vulnerability = {
+                    'sr_no': str(vuln.get('sr_no', idx)),
+                    'observation': vuln.get('observation', ''),
+                    'affected_asset': vuln.get('affected_asset', '') or vuln.get('ip_url_app', ''),
+                    'cve_cwe': vuln.get('cve_cwe', ''),
+                    'severity': vuln.get('severity', 'Medium'),
+                    'cvss': vuln.get('cvss', ''),
+                    'detailed_observation': vuln.get('detailed_observation', '') or vuln.get('observation_summary', ''),
+                    'recommendation': vuln.get('recommendation', ''),
+                    'reference': vuln.get('reference', ''),
+                    'steps_with_screenshots': steps_with_screenshots,
+                    'revalidation_status': revalidation_status,
+                    'screenshot': screenshot_path,
+                    'new_or_repeat': vuln.get('new_or_re', 'New Observation')
+                }
+                vulnerabilities.append(vulnerability)
+            
+            print(f"✅ Parsed {len(vulnerabilities)} vulnerabilities for MitKat report")
+            return vulnerabilities
+            
+        except Exception as std_error:
+            print(f"⚠️ Standardized parser failed: {std_error}, falling back to legacy parser")
+            traceback.print_exc()
+        
+        # Fallback to legacy parsing
+        df = pd.read_excel(file_path)
+        df.columns = df.columns.str.strip()
+        
+        for idx, row in df.iterrows():
+            try:
+                # Find columns (case-insensitive)
+                def find_col(possible_names):
+                    for name in possible_names:
+                        for col in df.columns:
+                            if name.lower() in col.lower():
+                                return col
+                    return None
+                
+                sr_no = str(row.get(find_col(['Sr No', 'Sr.No', 'Serial No']) or 'Sr No', idx + 1)).strip()
+                observation = str(row.get(find_col(['Observation', 'Vulnerability Title', 'Title']) or 'Observation', '')).strip()
+                affected_asset = str(row.get(find_col(['Affected Asset', 'IP', 'URL', 'Application']) or 'Affected Asset', '')).strip()
+                cve_cwe = str(row.get(find_col(['CVE/CWE', 'CVE', 'CWE']) or 'CVE/CWE', '')).strip()
+                severity = str(row.get(find_col(['Severity', 'Risk']) or 'Severity', 'Medium')).strip()
+                cvss = str(row.get(find_col(['CVSS', 'CVSS Score']) or 'CVSS', '')).strip()
+                detailed_obs = str(row.get(find_col(['Detailed Observation', 'Description', 'Details']) or 'Detailed Observation', '')).strip()
+                recommendation = str(row.get(find_col(['Recommendation', 'Remediation']) or 'Recommendation', '')).strip()
+                reference = str(row.get(find_col(['Reference', 'References']) or 'Reference', '')).strip()
+                revalidation_status = str(row.get(find_col(['Revalidation Status']) or 'Revalidation Status', '')).strip()
+                screenshot = str(row.get(find_col(['Screenshot']) or 'Screenshot', '')).strip()
+                
+                # Parse steps
+                steps_with_screenshots = []
+                steps_text = str(row.get(find_col(['Steps', 'Evidence', 'PoC']) or 'Steps', '')).strip()
+                if steps_text and steps_text.lower() not in ['nan', 'none', '']:
+                    step_lines = [line.strip() for line in steps_text.split('\n') if line.strip()]
+                    for i, step_line in enumerate(step_lines, 1):
+                        steps_with_screenshots.append({
+                            'text': step_line,
+                            'screenshot': ''
+                        })
+                
+                vulnerability = {
+                    'sr_no': sr_no,
+                    'observation': observation,
+                    'affected_asset': affected_asset,
+                    'cve_cwe': cve_cwe,
+                    'severity': severity,
+                    'cvss': cvss,
+                    'detailed_observation': detailed_obs,
+                    'recommendation': recommendation,
+                    'reference': reference,
+                    'steps_with_screenshots': steps_with_screenshots,
+                    'revalidation_status': revalidation_status,
+                    'screenshot': screenshot,
+                    'new_or_repeat': 'New Observation'
+                }
+                vulnerabilities.append(vulnerability)
+                
+            except Exception as e:
+                print(f"Error processing row {idx}: {e}")
+                continue
+        
+        print(f"✅ Parsed {len(vulnerabilities)} vulnerabilities (legacy parser)")
+        return vulnerabilities
+        
+    except Exception as e:
+        print(f"Error parsing MitKat Excel: {e}")
+        traceback.print_exc()
+        return []
+
+def index_mitkat_poc_images(poc_zip_dir):
+    """
+    Index POC images from ZIP file.
+    Expected structure: POC.zip/VUL-001/step1.png, step2.png, etc.
+    OR: POC.zip/#1/step1.png, step2.png, etc.
+    """
+    image_map = {}
+    
+    if not poc_zip_dir or not os.path.exists(poc_zip_dir):
+        return image_map
+    
+    print(f"Indexing MitKat POC images from: {poc_zip_dir}")
+    
+    # Walk through directory structure
+    for root, dirs, files in os.walk(poc_zip_dir):
+        # Check if this is a vulnerability folder (VUL-XXX or #X format)
+        folder_name = os.path.basename(root)
+        
+        # Match VUL-001, VUL-002, etc. or #1, #2, etc.
+        vuln_match = re.match(r'(?:VUL-|#)(\d+)', folder_name, re.IGNORECASE)
+        if vuln_match:
+            vuln_num = int(vuln_match.group(1))
+            vuln_key = f"VUL-{vuln_num:03d}"
+            
+            if vuln_key not in image_map:
+                image_map[vuln_key] = {}
+            
+            # Find all images in this folder
+            for fname in sorted(files):
+                if fname.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+                    # Extract step number from filename
+                    step_match = re.search(r'step[_\-\s]?(\d+)', fname.lower())
+                    if step_match:
+                        step_num = int(step_match.group(1))
+                    else:
+                        # Try to extract any number
+                        num_match = re.search(r'(\d+)', fname)
+                        step_num = int(num_match.group(1)) if num_match else len(image_map[vuln_key]) + 1
+                    
+                    img_path = os.path.join(root, fname)
+                    image_map[vuln_key][step_num] = img_path
+                    print(f"  Mapped {vuln_key}/Step {step_num}: {fname}")
+    
+    print(f"✅ Indexed POC images for {len(image_map)} vulnerabilities")
+    return image_map
+
+def create_mitkat_observations_table(doc, vulnerabilities, poc_image_map):
+    """
+    Create the Observations table for MitKat report (pages 9, 10, 11, etc.)
+    Each vulnerability gets its own detailed table.
+    """
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+    
+    for idx, vuln in enumerate(vulnerabilities, 1):
+        # Create main vulnerability table
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        
+        # Set column widths
+        table.columns[0].width = Inches(2.0)
+        table.columns[1].width = Inches(5.5)
+        
+        # Header row
+        header_row = table.rows[0]
+        
+        # Left cell: Sr No, Observation, Affected Asset
+        left_cell = header_row.cells[0]
+        left_cell.text = ''
+        p = left_cell.paragraphs[0]
+        
+        # Sr No
+        run = p.add_run(f"Sr. No.: {vuln.get('sr_no', idx)}")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        p.add_run().add_break()
+        
+        # Observation/Vulnerability Title
+        run = p.add_run(f"Observation/Vulnerability Title: ")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run = p.add_run(vuln.get('observation', 'N/A'))
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = False
+        p.add_run().add_break()
+        
+        # Affected Asset
+        run = p.add_run(f"Affected Asset: ")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run = p.add_run(vuln.get('affected_asset', 'N/A'))
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = False
+        
+        # Right cell: CVE/CWE, Severity, Status
+        right_cell = header_row.cells[1]
+        right_cell.text = ''
+        p = right_cell.paragraphs[0]
+        
+        # CVE/CWE
+        run = p.add_run(f"CVE/CWE: ")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run = p.add_run(vuln.get('cve_cwe', 'N/A'))
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = False
+        p.add_run().add_break()
+        
+        # Severity (with color coding)
+        severity = vuln.get('severity', 'Medium')
+        colors = get_severity_colors(severity)
+        run = p.add_run(f"Severity: {severity}")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(255, 255, 255)
+        shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{colors["row1_bg"].lstrip("#")}"/>')
+        right_cell._element.get_or_add_tcPr().append(shading_elm)
+        p.add_run().add_break()
+        
+        # New or Repeat Observation
+        run = p.add_run(f"New or Repeat Observation: ")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run = p.add_run(vuln.get('new_or_repeat', 'New Observation'))
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = False
+        
+        # Add detailed observation row
+        detail_row = table.add_row()
+        detail_cell = detail_row.cells[0]
+        detail_cell.merge(detail_row.cells[1])
+        detail_cell.text = ''
+        p = detail_cell.paragraphs[0]
+        run = p.add_run("Detailed Observation/Vulnerable Point: ")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run = p.add_run(vuln.get('detailed_observation', 'N/A'))
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = False
+        
+        # Add recommendation row
+        rec_row = table.add_row()
+        rec_cell = rec_row.cells[0]
+        rec_cell.merge(rec_row.cells[1])
+        rec_cell.text = ''
+        p = rec_cell.paragraphs[0]
+        run = p.add_run("Recommendation: ")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run = p.add_run(vuln.get('recommendation', 'N/A'))
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = False
+        
+        # Add reference row if present
+        if vuln.get('reference'):
+            ref_row = table.add_row()
+            ref_cell = ref_row.cells[0]
+            ref_cell.merge(ref_row.cells[1])
+            ref_cell.text = ''
+            p = ref_cell.paragraphs[0]
+            run = p.add_run("Reference: ")
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(11)
+            run.font.bold = True
+            run = p.add_run(vuln.get('reference', ''))
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(11)
+            run.font.bold = False
+            run.font.color.rgb = RGBColor(0, 0, 255)
+            run.font.underline = True
+        
+        # Add Proof of Concept/Steps row
+        poc_row = table.add_row()
+        poc_cell = poc_row.cells[0]
+        poc_cell.merge(poc_row.cells[1])
+        poc_cell.text = ''
+        p = poc_cell.paragraphs[0]
+        run = p.add_run("References to evidence/Proof of Concept: ")
+        run.font.name = 'Altone Trial'
+        run.font.size = Pt(11)
+        run.font.bold = True
+        
+        # Add steps with screenshots
+        steps = vuln.get('steps_with_screenshots', [])
+        vuln_key = f"VUL-{int(re.search(r'(\d+)', str(vuln.get('sr_no', idx))).group(1)):03d}" if re.search(r'(\d+)', str(vuln.get('sr_no', idx))) else None
+        
+        for step_idx, step in enumerate(steps, 1):
+            step_p = poc_cell.add_paragraph()
+            step_p.paragraph_format.left_indent = Pt(10)
+            run = step_p.add_run(f"Step {step_idx}: {step.get('text', '')}")
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(11)
+            run.font.bold = False
+            
+            # Add screenshot if available
+            screenshot_path = None
+            if poc_image_map and vuln_key and vuln_key in poc_image_map:
+                screenshot_path = poc_image_map[vuln_key].get(step_idx)
+            
+            if screenshot_path and os.path.exists(screenshot_path):
+                img_p = poc_cell.add_paragraph()
+                img_p.paragraph_format.left_indent = Pt(20)
+                img_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                img_run = img_p.add_run()
+                img_run.add_picture(screenshot_path, width=Inches(5))
+            elif step.get('screenshot'):
+                missing_p = poc_cell.add_paragraph()
+                missing_p.paragraph_format.left_indent = Pt(20)
+                run = missing_p.add_run(f"[Screenshot missing: {step.get('screenshot')}]")
+                run.font.name = 'Altone Trial'
+                run.font.size = Pt(10)
+                run.font.italic = True
+        
+        # Add Revalidation Status row if present
+        if vuln.get('revalidation_status'):
+            reval_row = table.add_row()
+            reval_cell = reval_row.cells[0]
+            reval_cell.merge(reval_row.cells[1])
+            reval_cell.text = ''
+            p = reval_cell.paragraphs[0]
+            run = p.add_run(f"Revalidation Status: {vuln.get('revalidation_status')}")
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(11)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(0, 128, 0)  # Green
+        
+        # Add spacing after table
+        doc.add_paragraph()
+        
+        # Add page break for next vulnerability (except last one)
+        if idx < len(vulnerabilities):
+            doc.add_page_break()
+
+def generate_mitkat_report(vulnerabilities, front_page_data, doc_control_data, template_path, output_path, poc_image_map=None):
+    """
+    Generate MitKat report from template and data.
+    """
+    try:
+        from docxtpl import DocxTemplate, InlineImage
+        
+        tpl = DocxTemplate(template_path)
+        
+        # Prepare context for template
+        context = {
+            # Front page data
+            'CLIENT_NAME': front_page_data.get('client_name', 'Client'),
+            'REPORT_TITLE': front_page_data.get('report_title', 'VAPT Final Report'),
+            'REPORT_TO': front_page_data.get('report_to', ''),
+            
+            # Document control data
+            'REPORT_RELEASE_DATE': doc_control_data.get('report_release_date', ''),
+            'TYPE_OF_AUDIT': doc_control_data.get('type_of_audit', ''),
+            'TYPE_OF_AUDIT_REPORT': doc_control_data.get('type_of_audit_report', ''),
+            'PERIOD': doc_control_data.get('period', ''),
+            'DOCUMENT_TITLE': doc_control_data.get('document_title', ''),
+            'DOCUMENT_ID': doc_control_data.get('document_id', ''),
+            'DOCUMENT_VERSION': doc_control_data.get('document_version', '1.0'),
+            'PREPARED_BY': doc_control_data.get('prepared_by', ''),
+            'REVIEWED_BY': doc_control_data.get('reviewed_by', ''),
+            'APPROVED_BY': doc_control_data.get('approved_by', ''),
+            'RELEASED_BY': doc_control_data.get('released_by', ''),
+            'RELEASE_DATE': doc_control_data.get('release_date', ''),
+            'DOCUMENT_CHANGE_HISTORY': doc_control_data.get('document_change_history', []),
+            'DISTRIBUTION_LIST': doc_control_data.get('distribution_list', []),
+            'ENGAGEMENT_SCOPE': doc_control_data.get('engagement_scope', []),
+            'AUDITING_TEAM': doc_control_data.get('auditing_team', []),
+            'TOOLS_SOFTWARE': doc_control_data.get('tools_software', []),
+            'INTRODUCTION': doc_control_data.get('introduction', ''),
+        }
+        
+        tpl.render(context)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            tpl.save(tmp.name)
+            tmp_path = tmp.name
+        
+        doc = Document(tmp_path)
+        
+        # Insert overall findings table and charts
+        # Find placeholder for observations or insert at end
+        insert_mitkat_overall_findings(doc, vulnerabilities)
+        
+        # Insert detailed observations tables (pages 9, 10, 11, etc.)
+        doc.add_page_break()
+        observations_heading = doc.add_paragraph("Observations")
+        observations_heading.runs[0].font.name = 'Altone Trial'
+        observations_heading.runs[0].font.size = Pt(18)
+        observations_heading.runs[0].font.bold = True
+        observations_heading.runs[0].font.color.rgb = RGBColor(106, 68, 154)
+        observations_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        create_mitkat_observations_table(doc, vulnerabilities, poc_image_map)
+        
+        doc.save(output_path)
+        os.remove(tmp_path)
+        
+        return output_path
+        
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error generating MitKat report: {str(e)}")
+
+def insert_mitkat_overall_findings(doc, vulnerabilities):
+    """
+    Insert overall findings table and charts for MitKat report.
+    """
+    # Count vulnerabilities by severity
+    severity_counts = Counter()
+    for vuln in vulnerabilities:
+        severity_counts[vuln.get('severity', 'Medium')] += 1
+    
+    # Create overall findings table
+    table = doc.add_table(rows=1, cols=6)
+    table.style = 'Table Grid'
+    
+    headers = ['Sr. No.', 'Affected Asset', 'Observation/Vulnerability Title', 'CWE/CWE', 'Severity', 'New or Repeat Observation']
+    header_row = table.rows[0]
+    
+    for idx, header_text in enumerate(headers):
+        cell = header_row.cells[idx]
+        p = cell.paragraphs[0]
+        p.text = header_text
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in p.runs:
+            run.font.bold = True
+            run.font.name = 'Altone Trial'
+            run.font.size = Pt(10)
+    
+    # Add data rows
+    for idx, vuln in enumerate(vulnerabilities, 1):
+        row = table.add_row()
+        row.cells[0].text = str(vuln.get('sr_no', idx))
+        row.cells[1].text = vuln.get('affected_asset', 'N/A')
+        row.cells[2].text = vuln.get('observation', 'N/A')
+        row.cells[3].text = vuln.get('cve_cwe', 'N/A')
+        row.cells[4].text = vuln.get('severity', 'Medium')
+        row.cells[5].text = vuln.get('new_or_repeat', 'New Observation')
+        
+        # Center align all cells
+        for cell in row.cells:
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in para.runs:
+                    run.font.name = 'Altone Trial'
+                    run.font.size = Pt(10)
+    
+    # Add bar chart
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as chart_file:
+        chart_path = create_severity_bar_chart(severity_counts, chart_file.name)
+        img_paragraph = doc.add_paragraph()
+        run = img_paragraph.add_run()
+        run.add_picture(chart_path, width=Inches(6))
+        img_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+@app.post("/mitkat/generate-report/")
+async def generate_mitkat_report_endpoint(
+    request: Request,
+    vulnerability_file: UploadFile = File(...),
+    poc_zip: UploadFile = File(None),
+    front_page_data: str = Form(...),
+    doc_control_data: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate MitKat report from uploaded files and form data.
+    """
+    try:
+        print(f"Starting MitKat report generation")
+        
+        # Parse form data
+        front_data = json.loads(front_page_data)
+        doc_control = json.loads(doc_control_data)
+        
+        # Save vulnerability file
+        vuln_file_path = os.path.join(UPLOAD_DIR, f"mitkat_vuln_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+        with open(vuln_file_path, "wb") as f:
+            f.write(await vulnerability_file.read())
+        
+        # Parse vulnerabilities
+        vulnerabilities = parse_mitkat_vulnerabilities_excel(vuln_file_path)
+        
+        # Process POC ZIP if provided
+        poc_image_map = {}
+        if poc_zip:
+            tmp_zip_dir = tempfile.mkdtemp()
+            zip_path = os.path.join(tmp_zip_dir, poc_zip.filename)
+            with open(zip_path, 'wb') as f:
+                f.write(await poc_zip.read())
+            
+            with ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(tmp_zip_dir)
+            
+            poc_image_map = index_mitkat_poc_images(tmp_zip_dir)
+        
+        # Template path
+        template_path = os.path.join(get_script_dir(), "MitKat_Template.docx")
+        if not os.path.exists(template_path):
+            raise HTTPException(status_code=404, detail="MitKat template not found. Please ensure MitKat_Template.docx is in the backend directory.")
+        
+        # Generate report
+        client_name = front_data.get('client_name', 'Client')
+        output_filename = f"{client_name}_MitKat_Report_{datetime.now().strftime('%Y-%m-%d')}.docx"
+        output_path = os.path.join(UPLOAD_DIR, output_filename)
+        
+        generate_mitkat_report(vulnerabilities, front_data, doc_control, template_path, output_path, poc_image_map)
+        
+        # Cleanup
+        os.remove(vuln_file_path)
+        
+        # Audit log
+        try:
+            user = request.session.get('user') or {}
+            db.add(AuditLog(
+                user_email=user.get('email'),
+                user_name=user.get('name'),
+                action='generate-mitkat-report',
+                metadata_json=json.dumps({
+                    'client_name': client_name,
+                    'vulnerability_count': len(vulnerabilities)
+                }),
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get('user-agent')
+            ))
+            db.commit()
+        except Exception:
+            pass
+        
+        return FileResponse(
+            path=output_path,
+            filename=output_filename,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/mitkat/", response_class=HTMLResponse)
+async def mitkat_form():
+    """Serve the MitKat report generator form"""
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>MitKat Report Generator</title>
+        <style>
+            body { font-family: Calibri, sans-serif; margin: 20px; background-color: #f5f5f5; }
+            .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            h1 { color: #6923d0; text-align: center; margin-bottom: 30px; }
+            .form-section { margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+            .form-section h3 { color: #6923d0; margin-top: 0; border-bottom: 2px solid #6923d0; padding-bottom: 10px; }
+            .form-row { display: flex; gap: 20px; margin-bottom: 15px; }
+            .form-group { flex: 1; }
+            .form-group label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
+            .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+            .form-group textarea { height: 80px; resize: vertical; }
+            .btn { background-color: #6923d0; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin: 5px; }
+            .btn:hover { background-color: #5a1fb8; }
+            .btn-success { background-color: #28a745; }
+            .btn-success:hover { background-color: #218838; }
+            .info-box { background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 15px; margin: 15px 0; }
+            .info-box h4 { margin-top: 0; color: #2196F3; }
+            .info-box code { background-color: #fff; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+            .progress { display: none; margin: 20px 0; }
+            .progress-bar { background-color: #6923d0; height: 20px; border-radius: 4px; width: 0%; transition: width 0.3s; }
+            .result { display: none; margin: 20px 0; padding: 15px; border-radius: 4px; }
+            .result.success { background-color: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+            .result.error { background-color: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔒 MitKat Report Generator</h1>
+            <div style="text-align:center;margin-bottom:16px;">
+                <a href="/report_formats.html" class="btn" style="text-decoration:none;display:inline-block;">← Back to Report Formats</a>
+            </div>
+            
+            <form id="mitkatForm">
+                <!-- Front Page Data -->
+                <div class="form-section">
+                    <h3>📄 Front Page Information</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="client_name">Client Name *</label>
+                            <input type="text" id="client_name" name="client_name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="report_title">Report Title *</label>
+                            <input type="text" id="report_title" name="report_title" value="PIPELINE MODULE VAPT FINAL REPORT" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="report_to">Report To *</label>
+                            <input type="text" id="report_to" name="report_to" placeholder="e.g., RECEIVABLES EXCHANGE OF INDIA LIMITED (RXIL)" required>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Document Control Data -->
+                <div class="form-section">
+                    <h3>📋 Document Control</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="report_release_date">Report Release Date *</label>
+                            <input type="date" id="report_release_date" name="report_release_date" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="type_of_audit">Type of Audit *</label>
+                            <input type="text" id="type_of_audit" name="type_of_audit" value="WebApplication Vulnerability Assessment & Penetration Testing" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="type_of_audit_report">Type of Audit Report *</label>
+                            <input type="text" id="type_of_audit_report" name="type_of_audit_report" value="FinalReport" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="period">Period *</label>
+                            <input type="text" id="period" name="period" placeholder="e.g., 07-07-2025 to 18-07-2025" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="document_title">Document Title *</label>
+                            <input type="text" id="document_title" name="document_title" value="Webapplication VAPT - Final Report" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="document_id">Document ID *</label>
+                            <input type="text" id="document_id" name="document_id" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="document_version">Document Version *</label>
+                            <input type="text" id="document_version" name="document_version" value="1.0" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="prepared_by">Prepared by *</label>
+                            <input type="text" id="prepared_by" name="prepared_by" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="reviewed_by">Reviewed by *</label>
+                            <input type="text" id="reviewed_by" name="reviewed_by" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="approved_by">Approved by *</label>
+                            <input type="text" id="approved_by" name="approved_by" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="released_by">Released by *</label>
+                            <input type="text" id="released_by" name="released_by" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="release_date">Release Date *</label>
+                            <input type="date" id="release_date" name="release_date" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="introduction">Introduction *</label>
+                        <textarea id="introduction" name="introduction" required></textarea>
+                    </div>
+                </div>
+
+                <!-- Vulnerability Data -->
+                <div class="form-section">
+                    <h3>🔍 Vulnerability Data</h3>
+                    <div class="info-box">
+                        <h4>📋 Excel Format Requirements</h4>
+                        <p><strong>Required columns:</strong></p>
+                        <ul>
+                            <li><code>Sr No</code> - Serial number</li>
+                            <li><code>Observation/Vulnerability Title</code> - Vulnerability name</li>
+                            <li><code>Affected Asset</code> - IP/URL/Application</li>
+                            <li><code>CVE/CWE</code> - CVE or CWE identifier</li>
+                            <li><code>Severity</code> - Critical, High, Medium, Low, Informational</li>
+                            <li><code>Detailed Observation</code> - Detailed description</li>
+                            <li><code>Recommendation</code> - Remediation steps</li>
+                            <li><code>Reference</code> - External references</li>
+                            <li><code>Steps</code> - Proof of concept steps</li>
+                            <li><code>Revalidation Status</code> - Status of revalidation (NEW COLUMN)</li>
+                            <li><code>Screenshot</code> - Screenshot filename (NEW COLUMN)</li>
+                        </ul>
+                    </div>
+                    <div class="form-group">
+                        <label for="vulnerability_file">Upload Vulnerability Excel File *</label>
+                        <input type="file" id="vulnerability_file" name="vulnerability_file" accept=".xlsx,.xls" required>
+                    </div>
+                    
+                    <div class="info-box">
+                        <h4>📁 PoC Zip Structure</h4>
+                        <p><strong>Recommended structure:</strong></p>
+                        <code>POC.zip/VUL-001/step1.png, step2.png, ...</code>
+                        <p><strong>OR:</strong></p>
+                        <code>POC.zip/#1/step1.png, step2.png, ...</code>
+                        <p>Where VUL-001 or #1 corresponds to the Sr No in Excel.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="poc_zip">Upload PoC Zip File (Optional)</label>
+                        <input type="file" id="poc_zip" name="poc_zip" accept=".zip">
+                    </div>
+                </div>
+
+                <div style="text-align: center; margin-top: 30px;">
+                    <button type="submit" class="btn btn-success" style="font-size: 18px; padding: 15px 30px;">
+                        🚀 Generate MitKat Report
+                    </button>
+                </div>
+            </form>
+
+            <div class="progress" id="progress">
+                <div style="background-color: #f0f0f0; border-radius: 4px; padding: 10px;">
+                    <div id="progressText">Processing...</div>
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+            </div>
+
+            <div class="result" id="result"></div>
+        </div>
+
+        <script>
+            document.getElementById('mitkatForm').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                const formData = new FormData();
+                
+                // Front page data
+                const frontPageData = {
+                    client_name: document.getElementById('client_name').value,
+                    report_title: document.getElementById('report_title').value,
+                    report_to: document.getElementById('report_to').value
+                };
+                formData.append('front_page_data', JSON.stringify(frontPageData));
+                
+                // Document control data
+                const docControlData = {
+                    report_release_date: document.getElementById('report_release_date').value,
+                    type_of_audit: document.getElementById('type_of_audit').value,
+                    type_of_audit_report: document.getElementById('type_of_audit_report').value,
+                    period: document.getElementById('period').value,
+                    document_title: document.getElementById('document_title').value,
+                    document_id: document.getElementById('document_id').value,
+                    document_version: document.getElementById('document_version').value,
+                    prepared_by: document.getElementById('prepared_by').value,
+                    reviewed_by: document.getElementById('reviewed_by').value,
+                    approved_by: document.getElementById('approved_by').value,
+                    released_by: document.getElementById('released_by').value,
+                    release_date: document.getElementById('release_date').value,
+                    introduction: document.getElementById('introduction').value,
+                    document_change_history: [],
+                    distribution_list: [],
+                    engagement_scope: [],
+                    auditing_team: [],
+                    tools_software: []
+                };
+                formData.append('doc_control_data', JSON.stringify(docControlData));
+                
+                // Files
+                formData.append('vulnerability_file', document.getElementById('vulnerability_file').files[0]);
+                if (document.getElementById('poc_zip').files[0]) {
+                    formData.append('poc_zip', document.getElementById('poc_zip').files[0]);
+                }
+                
+                try {
+                    document.getElementById('progress').style.display = 'block';
+                    document.getElementById('progressText').textContent = 'Generating report...';
+                    document.getElementById('progressBar').style.width = '50%';
+                    
+                    const response = await fetch('/mitkat/generate-report/', {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'same-origin'
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Report generation failed');
+                    }
+                    
+                    // Download the file
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = response.headers.get('content-disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'MitKat_Report.docx';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    
+                    document.getElementById('progressText').textContent = 'Report generated successfully!';
+                    document.getElementById('progressBar').style.width = '100%';
+                    
+                    document.getElementById('result').innerHTML = `
+                        <h3>✅ Report Generated Successfully!</h3>
+                        <p>The report has been downloaded.</p>
+                    `;
+                    document.getElementById('result').className = 'result success';
+                    document.getElementById('result').style.display = 'block';
+                    
+                } catch (error) {
+                    document.getElementById('progress').style.display = 'none';
+                    document.getElementById('result').innerHTML = `
+                        <h3>❌ Error</h3>
+                        <p>${error.message}</p>
+                    `;
+                    document.getElementById('result').className = 'result error';
+                    document.getElementById('result').style.display = 'block';
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
